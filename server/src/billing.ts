@@ -1,4 +1,5 @@
 import { grantOnce } from './credits';
+import { PLAN_FEATURES, projectLimit } from './plans';
 import { HttpError } from './http';
 import type { D1Database, Env } from './types';
 
@@ -25,8 +26,8 @@ export async function billingSummary(env: Env, userId: string, plan: string) {
     plan,
     status: sub?.status ?? 'none',
     plans: [
-      { id: 'free', label: 'Free', credits: 20 },
-      ...Object.entries(PLANS).map(([id, p]) => ({ id, label: p.label, credits: p.credits })),
+      { id: 'free', label: 'Free', credits: 20, projects: projectLimit('free'), features: PLAN_FEATURES.free },
+      ...Object.entries(PLANS).map(([id, p]) => ({ id, label: p.label, credits: p.credits, projects: projectLimit(id), features: PLAN_FEATURES[id] })),
     ],
     ledger: results.map((l) => ({ delta: l.delta, reason: l.reason, createdAt: l.created_at })),
   };
