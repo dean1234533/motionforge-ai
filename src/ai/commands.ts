@@ -1,5 +1,5 @@
 import { sanitizeText } from '../lib/sanitize';
-import { newEffect } from '../scene/defaults';
+import { newEffect, newLine, newShape } from '../scene/defaults';
 import { parseScene } from '../scene/schema';
 import type { EffectSettings, EffectType, Scene, SceneObject } from '../scene/schema';
 
@@ -60,6 +60,22 @@ export function applyEditCommand(prompt: string, scene: Scene, targetId: string 
       if (!next.ok) return { scene, message: `That change would make the scene invalid (${next.error}).` };
       const follows = effect.attachTo ? ' It follows the selected layer.' : '';
       return { scene: next.scene, message: `Added ${fx.type === 'snow' && fx.settings ? 'rain' : fx.type}.${follows} Adjust it in the properties panel.` };
+    }
+    const shapeWord = /\b(circle|ball|dot|disc|rectangle|square|box)\b/.exec(t);
+    if (shapeWord) {
+      if (scene.objects.length >= 20) return { scene, message: 'This scene already has the maximum number of layers.' };
+      const kind = /rect|square|box/.test(shapeWord[1]) ? 'rect' : 'circle';
+      const shape = newShape(`shape-${Math.random().toString(36).slice(2, 6)}`, kind);
+      const next = parseScene({ ...scene, objects: [...scene.objects, shape] });
+      if (!next.ok) return { scene, message: `That change would make the scene invalid (${next.error}).` };
+      return { scene: next.scene, message: `Added a ${kind === 'rect' ? 'rectangle' : 'circle'}. Drag its handles to move it, and change its colour in the properties panel.` };
+    }
+    if (/\b(line|trail|route|trace)\b/.test(t) || /\b(draw|show)\b.*\bpath\b/.test(t)) {
+      if (scene.objects.length >= 20) return { scene, message: 'This scene already has the maximum number of layers.' };
+      const line = newLine(`line-${Math.random().toString(36).slice(2, 6)}`, targetId);
+      const next = parseScene({ ...scene, objects: [...scene.objects, line] });
+      if (!next.ok) return { scene, message: `That change would make the scene invalid (${next.error}).` };
+      return { scene: next.scene, message: targetId ? 'Added a line that draws the selected layer\'s path as you scroll.' : 'Added a line. Drag its handles to shape it.' };
     }
     const thing = /\b(clouds?|trees?|sun|moon|birds?|stars?|mountains?|hills?|buildings?|city|background|grass|flowers?)\b/.exec(t);
     if (thing) {
