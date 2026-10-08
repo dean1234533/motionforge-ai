@@ -19,8 +19,15 @@ export interface R2Bucket {
   delete(keys: string | string[]): Promise<void>;
 }
 
+/** Cloudflare Workers AI. Present when the Worker has an `ai` binding. */
+export interface AiBinding {
+  run(model: string, input: Record<string, unknown>): Promise<unknown>;
+}
+
 export interface Env {
   DB: D1Database;
+  /** Cloudflare's built-in AI (image generation and prompt understanding). No key or account needed. */
+  AI?: AiBinding;
   FILES: R2Bucket;
   /** base64 of 32 random bytes; set with `wrangler secret put`. */
   KEY_ENCRYPTION_SECRET: string;
