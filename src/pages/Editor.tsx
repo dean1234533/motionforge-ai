@@ -11,6 +11,10 @@ import { sanitizeFilename, sanitizeText, slug, validateUpload } from '../lib/san
 import { emptyScene, newObject } from '../scene/defaults';
 import { EASINGS, parseScene } from '../scene/schema';
 import type { Keyframe, Scene, SceneObject } from '../scene/schema';
+import { extractFrames } from '../ai/videoFrames';
+import { toUploadBlob } from '../ai/imagePipeline';
+import { api, uploadBinary, when } from '../lib/api';
+import { useSession } from '../lib/session';
 
 interface Asset {
   id: string;
@@ -47,6 +51,22 @@ interface LogLine {
   text: string;
 }
 
+interface ModeInfo {
+  mode: GenerationMode;
+  label: string;
+  cost: number;
+  provider: string | null;
+  available: boolean;
+}
+
+interface ServerJob {
+  id: string;
+  status: 'queued' | 'running' | 'complete' | 'failed' | 'cancelled';
+  stage: string;
+  error: string | null;
+  result: { plan: { patch: Partial<SceneObject>; scrollLength?: number; summary: string } | null; videoUrl: string | null } | null;
+}
+
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 const uid = (name: string) => `${slug(name, 'layer')}-${Math.random().toString(36).slice(2, 6)}`;
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -61,7 +81,7 @@ function download(name: string, data: BlobPart, type: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function Editor({ initialPrompt }: { initialPrompt: string }) {
+export function Editor({ initialPrompt, projectId }: { initialPrompt: string; projectId?: string }) {
   const history = useHistory<Scene>(emptyScene());
   const scene = history.state;
   const sceneRef = useRef(scene);
@@ -90,6 +110,28 @@ export function Editor({ initialPrompt }: { initialPrompt: string }) {
 
   const sel: SceneObject | null = scene.objects.find((o) => o.id === selectedId) ?? scene.objects[0] ?? null;
   const providers = getProviders(mode);
+  const session = useSession();
+  const [serverModes, setServerModes] = useState<ModeInfo[]>([]);
+  const [showShare, setShowShare] = useState(false);
+  const aborted = useRef(false);
+  const modeInfo = serverModes.find((m) => m.mode === mode);
+
+  useEffect(() => {
+    aborted.current = false;
+    return () => {
+      aborted.current = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!projectId) return;
+    api<{ modes: ModeInfo[]; balance: number }>('GET', '/api/modes')
+      .then((r) => {
+        setServerModes(r.modes);
+        session.setCredits(r.balance);
+      })
+      .catch(() => undefined);
+  }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const say = useCallback((role: LogLine['role'], text: string) => {
     setLog((l) => [...l.slice(-5), { id: Date.now() + Math.random(), role, text }]);
@@ -115,6 +157,27 @@ export function Editor({ initialPrompt }: { initialPrompt: string }) {
     let cancelled = false;
     (async () => {
       try {
+        if (projectId) {
+          const { project } = await api<{ project: { name: string; scene: unknown } }>('GET', `/api/projects/${projectId}`);
+          const parsedScene = parseScene(project.scene);
+          if (!parsedScene.ok) throw new Error(parsedScene.error);
+          const { assets: list } = await api<{ assets: { id: string; name: string; hasFrames: boolean }[] }>('GET', `/api/projects/${projectId}/assets`);
+          const restored: Asset[] = [];
+          for (const a of list) {
+            const blob = await (await fetch(`/api/projects/${projectId}/assets/${a.id}`, { credentials: 'same-origin' })).blob();
+            const source = await readFileAsDataUrl(new File([blob], a.name, { type: blob.type }));
+            let frames: string[] | null = null;
+            if (a.hasFrames) {
+              const fr = await fetch(`/api/projects/${projectId}/assets/${a.id}/frames`, { credentials: 'same-origin' });
+              if (fr.ok) frames = (await fr.json()) as string[];
+            }
+            restored.push({ id: a.id, name: a.name, source, frames: frames ?? (await buildAsset(source, () => undefined)).frames });
+          }
+          if (cancelled) return;
+          setAssets(restored);
+          history.reset(parsedScene.scene);
+          return;
+        }
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return;
         const saved = JSON.parse(raw) as Saved;
@@ -144,6 +207,12 @@ export function Editor({ initialPrompt }: { initialPrompt: string }) {
     if (restoring) return;
     setSaveState('saving');
     const t = setTimeout(() => {
+      if (projectId) {
+        api('PUT', `/api/projects/${projectId}`, { scene })
+          .then(() => setSaveState('saved'))
+          .catch(() => setSaveState('error'));
+        return;
+      }
       try {
         const data: Saved = {
           v: 1,
@@ -229,6 +298,9 @@ export function Editor({ initialPrompt }: { initialPrompt: string }) {
           commit({ ...sceneRef.current, objects: [...sceneRef.current.objects, obj] });
           setSelectedId(id);
         }
+        if (projectId) {
+          await uploadBinary(`/api/projects/${projectId}/assets/${id}?name=${encodeURIComponent(name)}`, await toUploadBlob(source));
+        }
         setJob({ stage: 'Complete' });
         say('ai', built.backgroundRemoved ? 'Background removed and motion frames created.' : 'Transparent image detected, so its background was kept as is. Motion frames created.');
         setTimeout(() => setJob((j) => (j?.stage === 'Complete' ? null : j)), 1500);
@@ -277,6 +349,7 @@ export function Editor({ initialPrompt }: { initialPrompt: string }) {
     if (!window.confirm(`Delete "${a.name}" and any layers that use it?`)) return;
     setAssets((prev) => prev.filter((x) => x.id !== a.id));
     commit({ ...scene, objects: scene.objects.filter((o) => o.assetId !== a.id) });
+    if (projectId) api('DELETE', `/api/projects/${projectId}/assets/${a.id}`).catch(() => setNotice('The image was removed here but could not be deleted from your account. Try again later.'));
   };
 
   // ---- layers ------------------------------------------------------------
@@ -351,6 +424,10 @@ export function Editor({ initialPrompt }: { initialPrompt: string }) {
       say('ai', 'Upload an image or use the sample bird first, then describe how it should move.');
       return;
     }
+    if (projectId && mode !== 'free') {
+      await runPaid(text, sel);
+      return;
+    }
     const attempt = async (): Promise<void> => {
       try {
         setJob({ stage: 'Analysing prompt' });
@@ -390,6 +467,97 @@ export function Editor({ initialPrompt }: { initialPrompt: string }) {
     return () => window.removeEventListener('keydown', on);
   }, [history.undo, history.redo]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ---- paid generation (server jobs) ------------------------------------------
+  const applyServerResult = async (job: ServerJob, target: SceneObject) => {
+    const plan = job.result?.plan;
+    const videoUrl = job.result?.videoUrl;
+    if (plan) {
+      const cur = sceneRef.current;
+      const patch = { ...plan.patch };
+      // A generated clip already contains several wing beats, so play it a few times, not 14.
+      if (videoUrl && patch.flapsPerScroll) patch.flapsPerScroll = Math.max(1, Math.round(patch.flapsPerScroll / 6));
+      commit({
+        ...cur,
+        objects: cur.objects.map((o) => (o.id === target.id ? { ...o, ...patch } : o)),
+        scroll: { ...cur.scroll, length: plan.scrollLength ?? cur.scroll.length },
+      });
+    }
+    if (videoUrl) {
+      setJob({ stage: 'Processing frames' });
+      const frames = await extractFrames(videoUrl);
+      setAssets((prev) => prev.map((a) => (a.id === target.assetId ? { ...a, frames } : a)));
+      await api('PUT', `/api/projects/${projectId}/assets/${target.assetId}/frames`, frames);
+    }
+  };
+
+  const pollJob = async (jobId: string, target: SceneObject): Promise<void> => {
+    const deadline = Date.now() + 20 * 60_000;
+    while (!aborted.current && Date.now() < deadline) {
+      const { job } = await api<{ job: ServerJob }>('GET', `/api/jobs/${jobId}`);
+      if (job.status === 'failed') {
+        setJob({
+          stage: 'Failed',
+          error: job.error ?? 'The generation failed.',
+          retry: async () => {
+            try {
+              await api('POST', `/api/jobs/${jobId}/retry`, {});
+              setJob({ stage: 'Analysing prompt' });
+              await pollJob(jobId, target);
+            } catch (e) {
+              setJob({ stage: 'Failed', error: e instanceof Error ? e.message : 'Retry failed.' });
+            }
+          },
+        });
+        return;
+      }
+      if (job.status === 'complete') {
+        try {
+          await applyServerResult(job, target);
+          setJob({ stage: 'Complete' });
+          say('ai', job.result?.plan?.summary ?? 'Generation finished.');
+          setTimeout(() => setJob((j) => (j?.stage === 'Complete' ? null : j)), 1200);
+        } catch (e) {
+          setJob({ stage: 'Failed', error: e instanceof Error ? e.message : 'Could not use the generated result.' });
+        }
+        const me = await api<{ credits: number }>('GET', '/api/me').catch(() => null);
+        if (me) session.setCredits(me.credits);
+        return;
+      }
+      if (job.status === 'cancelled') return setJob(null);
+      setJob({ stage: (STAGES.includes(job.stage as Stage) ? job.stage : 'Generating motion') as Stage });
+      await wait(2500);
+    }
+  };
+
+  const runPaid = async (text: string, target: SceneObject | null) => {
+    if (!target) {
+      say('ai', 'Add an image first, then describe how it should move.');
+      return;
+    }
+    if (!modeInfo?.available) {
+      say('ai', 'That mode is not available on this server yet.');
+      return;
+    }
+    const keyProvider = mode === 'byok' ? 'replicate' : undefined;
+    const cost = modeInfo.cost === 0 ? 'no credits (you pay the provider directly)' : `${modeInfo.cost} credits (you have ${session.credits})`;
+    if (!window.confirm(`This will use ${cost} with ${modeInfo.provider}. Continue?`)) return;
+    try {
+      setJob({ stage: 'Analysing prompt' });
+      const created = await api<{ job: ServerJob; credits: number }>('POST', '/api/jobs', {
+        projectId,
+        mode,
+        prompt: text,
+        idempotencyKey: crypto.randomUUID(),
+        assetId: target.assetId,
+        keyProvider,
+      });
+      session.setCredits(created.credits);
+      await pollJob(created.job.id, target);
+    } catch (e) {
+      setJob({ stage: 'Failed', error: e instanceof Error ? e.message : 'Could not start the generation.' });
+    }
+  };
+
   const hasObjects = scene.objects.length > 0;
 
   // ---- export view -------------------------------------------------------
@@ -398,6 +566,7 @@ export function Editor({ initialPrompt }: { initialPrompt: string }) {
       <ExportView
         scene={scene}
         assets={framesMap}
+        projectId={projectId}
         onBack={() => setView('edit')}
       />
     );
@@ -408,12 +577,13 @@ export function Editor({ initialPrompt }: { initialPrompt: string }) {
       <header className="ed-top">
         <a className="brand" href="#/">MotionForge <span>AI</span></a>
         <div className="ed-top-group">
+          {projectId && <a className="btn ghost" href="#/dashboard">← Projects</a>}
           <label className="inline">
             <span className="sr-only">Generation mode</span>
             <select value={mode} onChange={(e) => setMode(e.target.value as GenerationMode)} aria-label="Generation mode">
               {Object.values(PROVIDER_SETS).map((p) => (
-                <option key={p.mode} value={p.mode} disabled={!p.available}>
-                  {p.label}{p.available ? '' : ' (needs server)'}
+                <option key={p.mode} value={p.mode} disabled={projectId ? !serverModes.find((s) => s.mode === p.mode)?.available : !p.available}>
+                  {p.label}{(projectId ? serverModes.find((s) => s.mode === p.mode)?.available : p.available) ? '' : projectId ? ' (not set up)' : ' (sign in to use)'}
                 </option>
               ))}
             </select>
@@ -427,6 +597,8 @@ export function Editor({ initialPrompt }: { initialPrompt: string }) {
           </div>
         </div>
         <div className="ed-top-group">
+          {projectId && <span className="muted" title="Credits available">{session.credits} credits</span>}
+          {projectId && <button type="button" className="btn ghost" onClick={() => setShowShare(true)}>Share</button>}
           <button type="button" className="btn ghost" onClick={history.undo} disabled={!history.canUndo}>Undo</button>
           <button type="button" className="btn ghost" onClick={history.redo} disabled={!history.canRedo}>Redo</button>
           <span className={`save save-${saveState}`} role="status">
@@ -582,6 +754,7 @@ export function Editor({ initialPrompt }: { initialPrompt: string }) {
       </section>
 
       {job && <JobStatus job={job} onClose={() => setJob(null)} />}
+      {showShare && projectId && <ShareDialog projectId={projectId} onClose={() => setShowShare(false)} />}
 
       <div className="promptbar">
         <div className="log" aria-live="polite">
@@ -600,7 +773,9 @@ export function Editor({ initialPrompt }: { initialPrompt: string }) {
           <button type="submit" className="btn primary" disabled={!prompt.trim() || (job !== null && job.stage !== 'Failed' && job.stage !== 'Complete')}>Send</button>
         </form>
         <p className="muted small-note">
-          Using {providers.planner.id} · {providers.backgroundRemover.id} · {providers.motionFrames.id} · estimated cost: 0 credits
+          {projectId && mode !== 'free' && modeInfo
+            ? `Using ${modeInfo.provider ?? 'no provider'} · estimated cost: ${modeInfo.cost === 0 ? '0 credits (your own key)' : `${modeInfo.cost} credits`}`
+            : `Using ${providers.planner.id} · ${providers.backgroundRemover.id} · ${providers.motionFrames.id} · estimated cost: 0 credits`}
         </p>
       </div>
     </div>
@@ -652,8 +827,77 @@ function Triple(props: { label: string; min: number; max: number; step: number; 
   );
 }
 
-function ExportView({ scene, assets, onBack }: { scene: Scene; assets: Record<string, string[]>; onBack: () => void }) {
+function ShareDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
+  const [links, setLinks] = useState<{ token: string; createdAt: number }[] | null>(null);
   const [msg, setMsg] = useState('');
+  const urlFor = (token: string) => `${window.location.origin}${window.location.pathname}#/share/${token}`;
+
+  const load = useCallback(async () => {
+    try {
+      setLinks((await api<{ shares: { token: string; createdAt: number }[] }>('GET', `/api/projects/${projectId}/shares`)).shares);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Could not load share links.');
+    }
+  }, [projectId]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const create = async () => {
+    try {
+      await api('POST', `/api/projects/${projectId}/shares`, {});
+      setMsg('Link created. Anyone with it can view (not edit) this animation.');
+      await load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Could not create a link.');
+    }
+  };
+  const copy = async (token: string) => {
+    try {
+      await navigator.clipboard.writeText(urlFor(token));
+      setMsg('Link copied.');
+    } catch {
+      setMsg(urlFor(token));
+    }
+  };
+  const revoke = async (token: string) => {
+    try {
+      await api('DELETE', `/api/projects/${projectId}/shares/${token}`);
+      setMsg('Link turned off.');
+      await load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Could not turn off that link.');
+    }
+  };
+
+  return (
+    <div className="modal" role="dialog" aria-modal="true" aria-label="Share this animation">
+      <div className="modal-card">
+        <h2>Share</h2>
+        <p className="muted">Share a view-only page. Visitors do not need an account.</p>
+        <button type="button" className="btn primary" onClick={() => void create()}>Create a link</button>
+        <ul className="list">
+          {links?.map((l) => (
+            <li key={l.token} className="asset">
+              <span className="grow" title={urlFor(l.token)}>Created {when(l.createdAt)}</span>
+              <button type="button" className="btn small" onClick={() => void copy(l.token)}>Copy link</button>
+              <button type="button" className="btn small ghost danger" onClick={() => void revoke(l.token)}>Turn off</button>
+            </li>
+          ))}
+        </ul>
+        {links?.length === 0 && <p className="muted">No links yet.</p>}
+        <p role="status" className="muted small-note">{msg}</p>
+        <button type="button" className="btn ghost" onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
+function ExportView({ scene, assets, projectId, onBack }: { scene: Scene; assets: Record<string, string[]>; projectId?: string; onBack: () => void }) {
+  const [msg, setMsg] = useState('');
+  const logExport = (format: string) => {
+    if (projectId) api('POST', `/api/projects/${projectId}/exports`, { format }).catch(() => undefined);
+  };
   const input = useMemo(() => ({ scene, assets }), [scene, assets]);
   const html = useMemo(() => buildStandaloneHtml(input), [input]);
   const kb = Math.round(html.length / 1024);
@@ -661,6 +905,7 @@ function ExportView({ scene, assets, onBack }: { scene: Scene; assets: Record<st
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(buildSnippet(input));
+      logExport('snippet');
       setMsg('Embed snippet copied.');
     } catch {
       setMsg('Your browser blocked copying. Download the HTML file instead.');
@@ -678,9 +923,9 @@ function ExportView({ scene, assets, onBack }: { scene: Scene; assets: Record<st
           <h1>Export</h1>
           <p className="muted">This is exactly what your visitors get. It runs on its own: no account, no API keys, no connection to MotionForge.</p>
           <div className="row wrap">
-            <button type="button" className="btn primary" onClick={() => download('motionforge-animation.html', html, 'text/html')}>Download standalone HTML</button>
+            <button type="button" className="btn primary" onClick={() => { logExport('html'); download('motionforge-animation.html', html, 'text/html'); }}>Download standalone HTML</button>
             <button type="button" className="btn" onClick={() => void copy()}>Copy embed snippet</button>
-            <button type="button" className="btn" onClick={() => download('motionforge-bundle.zip', buildZip(input) as unknown as BlobPart, 'application/zip')}>Download self-host ZIP</button>
+            <button type="button" className="btn" onClick={() => { logExport('zip'); download('motionforge-bundle.zip', buildZip(input) as unknown as BlobPart, 'application/zip'); }}>Download self-host ZIP</button>
           </div>
           <p role="status" className="muted">{msg || `Standalone file size: about ${kb} KB.`}</p>
 
