@@ -38,6 +38,7 @@ export function replicateProvider(cfg: ReplicateConfig): ServerProvider {
   return {
     id: `replicate:${cfg.version.slice(0, 8)}`,
     keyProviders: ['replicate'],
+    needsImage: true,
     async step(stage, ctx) {
       if (stage === 'Analysing prompt') return localRulesProvider.step(stage, ctx);
 
