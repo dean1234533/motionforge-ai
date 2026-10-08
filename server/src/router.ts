@@ -15,7 +15,7 @@ import { projectAccess } from './access';
 import { withDefaults } from './env';
 import type { RawEnv } from './env';
 import { ensureSchema } from './schema';
-import { sendMail } from './mail';
+import { mailConfigured, sendMail } from './mail';
 import type { Env, UserRow } from './types';
 
 export interface Deps {
@@ -299,6 +299,15 @@ async function route(req: Request, rawEnv: RawEnv, deps: Deps, ctx?: Ctx): Promi
       modes: (['free', 'fast', 'professional', 'byok'] as const).map((mode) => estimate(mode, reg.modes)),
       tools: estimateTools(reg),
       balance: await balance(db, user.id),
+      // Yes/no only, never the values: lets the app say exactly what the server is missing.
+      setup: {
+        encryptionSecret: Boolean(rawEnv.KEY_ENCRYPTION_SECRET),
+        ai: Boolean(env.AI),
+        replicateToken: Boolean(env.REPLICATE_API_TOKEN),
+        proModel: Boolean(env.REPLICATE_PRO_MODEL || env.REPLICATE_PRO_VERSION),
+        stripe: billingConfigured(env),
+        email: mailConfigured(env),
+      },
     });
   }
   if (path === '/api/jobs' && method === 'GET') {
