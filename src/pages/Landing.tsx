@@ -55,12 +55,37 @@ function BirdDemo() {
   );
 }
 
-const GALLERY = [
-  ['Bird in flight', DEMO_PROMPT],
-  ['Product reveal', 'Make this product rotate slowly and grow larger as the visitor scrolls.'],
-  ['Drifting balloon', 'Make this balloon float from the bottom to the top, gently swaying.'],
-  ['Cinematic sweep', 'Make this object move from the left to the right in a cinematic way.'],
+type ArtKind = 'bird' | 'product' | 'balloon' | 'sweep' | 'rocket' | 'snow';
+
+const GALLERY: [string, string, ArtKind][] = [
+  ['Bird in flight', DEMO_PROMPT, 'bird'],
+  ['Product reveal', 'Make this product rotate slowly and grow larger as the visitor scrolls.', 'product'],
+  ['Drifting balloon', 'Make this balloon float from the bottom to the top, gently swaying.', 'balloon'],
+  ['Cinematic sweep', 'Make this object move from the left to the right in a cinematic way.', 'sweep'],
+  ['Rocket launch', 'Make this rocket fly from the bottom to the top. Add fire behind it.', 'rocket'],
+  ['Falling snow', 'Add snow to the scene and make it feel cinematic.', 'snow'],
 ];
+
+/** Small looping previews of each idea, drawn with SVG and CSS so they cost nothing to load. */
+function Art({ kind }: { kind: ArtKind }) {
+  return (
+    <svg className={`art art-${kind}`} viewBox="0 0 160 90" role="img" aria-label={`${kind} animation preview`}>
+      <rect width="160" height="90" rx="8" className="art-bg" />
+      {kind === 'bird' && (
+        <g className="a-fly"><path className="a-wing a-wing-l" d="M80 46 C62 30 40 28 26 34 C42 38 52 44 56 52 Z" /><path className="a-wing a-wing-r" d="M80 46 C98 30 120 28 134 34 C118 38 108 44 104 52 Z" /><ellipse cx="80" cy="52" rx="7" ry="14" className="a-body" /></g>
+      )}
+      {kind === 'product' && <rect className="a-spin" x="60" y="25" width="40" height="40" rx="6" />}
+      {kind === 'balloon' && (
+        <g className="a-float"><ellipse cx="80" cy="40" rx="14" ry="18" className="a-balloon" /><path d="M80 58 L80 78" className="a-string" /></g>
+      )}
+      {kind === 'sweep' && <circle className="a-sweep" cx="30" cy="45" r="10" />}
+      {kind === 'rocket' && (
+        <g className="a-launch"><path d="M80 18 C90 30 90 52 86 62 L74 62 C70 52 70 30 80 18 Z" className="a-rocket" /><circle className="a-flame a-flame-1" cx="80" cy="68" r="5" /><circle className="a-flame a-flame-2" cx="80" cy="76" r="4" /></g>
+      )}
+      {kind === 'snow' && <g>{[20, 48, 76, 104, 132].map((x, i) => <circle key={x} className="a-snow" style={{ animationDelay: `${i * -0.7}s` }} cx={x} cy="0" r="2.4" />)}</g>}
+    </svg>
+  );
+}
 
 const FAQ = [
   ['Do I need to code?', 'No. Upload an image, describe the motion, adjust it visually, and copy the result into your site.'],
@@ -103,8 +128,9 @@ export function Landing() {
       <section className="section" aria-labelledby="gallery">
         <h2 id="gallery">Try an idea</h2>
         <ul className="cards">
-          {GALLERY.map(([title, prompt]) => (
+          {GALLERY.map(([title, prompt, art]) => (
             <li key={title}>
+              <Art kind={art} />
               <b>{title}</b>
               <span>“{prompt}”</span>
               <a href={`#/editor?prompt=${encodeURIComponent(prompt)}`}>Use this prompt</a>
