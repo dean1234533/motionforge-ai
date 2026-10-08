@@ -9,6 +9,6 @@ export default defineConfig({
   projects: [
     { name: 'chromium', use: { browserName: 'chromium' }, testIgnore: /mobile\.spec/ },
     // A real phone: touch input, a small screen and a mobile user agent.
-    { name: 'mobile', use: { ...devices['Pixel 5'] }, testMatch: /(mobile|clickable)\.spec/ },
+    { name: 'mobile', use: { ...devices['Pixel 5'] }, testMatch: /(mobile|clickable|tabs)\.spec/ },
   ],
 });
