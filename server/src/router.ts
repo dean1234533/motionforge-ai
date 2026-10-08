@@ -1,6 +1,6 @@
 import { clearCookie, createSession, getUser, login, logout, rateLimit, sessionCookie, signup, validateCredentials } from './auth';
 import { deleteAsset, getJobFile, listAssets, readAsset, readAssetRaw, readFramesRaw, saveAsset, saveFrames, MAX_ASSET_BYTES, MAX_FRAMES_BYTES, readFrames } from './assets';
-import { billingSummary, createCheckout, createPortal, handleStripeEvent, verifyStripeSignature } from './billing';
+import { billingConfigured, billingSummary, createCheckout, createPortal, handleStripeEvent, verifyStripeSignature } from './billing';
 import { balance, ensureMonthlyGrant } from './credits';
 import { HttpError, json, readJson } from './http';
 import { cancelJob, createJob, estimate, estimateTools, getJob, jobView, listJobs, retryJob, runJob } from './jobs';
