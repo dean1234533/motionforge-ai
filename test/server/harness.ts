@@ -61,6 +61,7 @@ export function makeApp(deps: Partial<Deps> = {}, envExtra: Partial<Env> = {}) {
   const full: Deps = { providers: defaultProviders, fetchFn: async () => new Response('{}'), ...deps };
 
   async function send(method: string, path: string, body: BodyInit | undefined, headers: Record<string, string>) {
+    await ensureSchema(env.DB);
     const res = await handle(new Request(`http://app.test${path}`, { method, headers, body }), env, full, { waitUntil: (p) => void pending.push(p) });
     const buf = new Uint8Array(await res.arrayBuffer());
     const text = new TextDecoder().decode(buf);
