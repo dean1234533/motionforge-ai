@@ -45,6 +45,39 @@ interface Saved {
 }
 
 type Device = 'desktop' | 'tablet' | 'mobile';
+
+/** The editing controls are split into tabs, one group per tab. */
+type LeftTab = 'media' | 'add' | 'layers';
+type RightTab = 'layer' | 'look' | 'timing' | 'path' | 'scroll';
+const LEFT_TABS: { id: LeftTab; label: string }[] = [
+  { id: 'media', label: 'Media' },
+  { id: 'add', label: 'Add' },
+  { id: 'layers', label: 'Layers' },
+];
+const RIGHT_TABS: { id: RightTab; label: string }[] = [
+  { id: 'layer', label: 'Layer' },
+  { id: 'look', label: 'Look' },
+  { id: 'timing', label: 'Timing' },
+  { id: 'path', label: 'Path' },
+  { id: 'scroll', label: 'Scroll' },
+];
+const TAB_KEY = 'motionforge.tabs';
+function readTab<T extends string>(side: 'left' | 'right', tabs: { id: T }[], fallback: T): T {
+  try {
+    const v = JSON.parse(localStorage.getItem(TAB_KEY) ?? '{}')[side];
+    return tabs.some((t) => t.id === v) ? (v as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function saveTab(side: 'left' | 'right', value: string) {
+  try {
+    const cur = JSON.parse(localStorage.getItem(TAB_KEY) ?? '{}');
+    localStorage.setItem(TAB_KEY, JSON.stringify({ ...cur, [side]: value }));
+  } catch {
+    /* remembering the tab is a nicety */
+  }
+}
 const DEVICE_WIDTH: Record<Device, string> = { desktop: '100%', tablet: '768px', mobile: '390px' };
 const STORAGE_KEY = 'motionforge.project.v1';
 const STAGES: Stage[] = [
@@ -143,6 +176,16 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
   const [aiPrompt, setAiPrompt] = useState('');
   const [payWithKey, setPayWithKey] = useState(false);
   const [fxType, setFxType] = useState<EffectType>('smoke');
+  const [leftTab, setLeftTabState] = useState<LeftTab>(() => readTab('left', LEFT_TABS, 'media'));
+  const [rightTab, setRightTabState] = useState<RightTab>(() => readTab('right', RIGHT_TABS, 'layer'));
+  const setLeftTab = (t: LeftTab) => {
+    setLeftTabState(t);
+    saveTab('left', t);
+  };
+  const setRightTab = (t: RightTab) => {
+    setRightTabState(t);
+    saveTab('right', t);
+  };
   const [shapeType, setShapeType] = useState<ShapeSettings['type']>('circle');
   const readOnly = role === 'viewer';
 
@@ -651,6 +694,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     const fx = newEffect(`${type}-${Math.random().toString(36).slice(2, 6)}`, type, follows);
     commit({ ...scene, objects: [...scene.objects, fx] });
     setSelectedId(fx.id);
+    setRightTab('layer');
     say('ai', `Added ${EFFECT_LABELS[type].toLowerCase()}.${follows ? ' It follows the selected layer.' : ''}`);
   };
 
@@ -659,6 +703,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     const s = newShape(`shape-${Math.random().toString(36).slice(2, 6)}`, shapeType);
     commit({ ...scene, objects: [...scene.objects, s] });
     setSelectedId(s.id);
+    setRightTab('layer');
   };
 
   const addLine = () => {
@@ -666,6 +711,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     const l = newLine(`line-${Math.random().toString(36).slice(2, 6)}`, sel && sel.kind !== 'line' ? sel.id : null);
     commit({ ...scene, objects: [...scene.objects, l] });
     setSelectedId(l.id);
+    setRightTab('layer');
     say('ai', l.attachTo ? 'Added a line that draws the selected layer\'s path as you scroll.' : 'Added a line. Drag its handles to shape it.');
   };
 
@@ -844,6 +890,9 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
       <div className="ed-main">
         <aside className="panel left" aria-label="Assets and layers">
           <fieldset disabled={readOnly} className="plain">
+          <TabBar label="Editing tools" tabs={LEFT_TABS} value={leftTab} onChange={setLeftTab} />
+          <div role="tabpanel" aria-label={LEFT_TABS.find((t) => t.id === leftTab)?.label}>
+          {leftTab === 'media' && (<>
           <h2>Images</h2>
           <div className="row">
             <button type="button" className="btn" onClick={() => fileRef.current?.click()}>Upload image</button>
@@ -868,6 +917,8 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
             ))}
           </ul>
 
+          </>)}
+          {leftTab === 'add' && (<>
           <h2>Effects</h2>
           <div className="row">
             <label className="sr-only" htmlFor="fx-type">Effect type</label>
@@ -890,7 +941,8 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
           </div>
           <p className="muted small-note">Shapes are simple HTML elements. “Trace path” draws the selected layer's route as a line that fills in as you scroll.</p>
 
-          {projectId && (
+          </>)}
+          {leftTab === 'media' && projectId && (
             <>
               <h2>Create with AI</h2>
               {serverTools.find((t) => t.kind === 'image-gen')?.available ? (
@@ -920,6 +972,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
             </>
           )}
 
+          {leftTab === 'layers' && (<>
           <h2>Layers</h2>
           {!hasObjects && <p className="muted">Layers appear here once you add an image. The last layer is drawn on top.</p>}
           <ul className="list">
@@ -933,6 +986,8 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
               </li>
             ))}
           </ul>
+          </>)}
+          </div>
           </fieldset>
         </aside>
 
@@ -947,7 +1002,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
                 onLoad={() => post({ type: 'mf-scene', scene: sceneRef.current })}
               />
               {sel && !sel.pinned && !sel.attachTo && (
-                <PathOverlay obj={sel} selected={pointIdx} onSelect={setPointIdx} onChange={setPath} />
+                <PathOverlay obj={sel} selected={pointIdx} onSelect={(i) => { setPointIdx(i); setRightTab('path'); }} onChange={setPath} />
               )}
             </div>
           ) : (
@@ -963,9 +1018,12 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
         <aside className="panel right" aria-label="Properties">
           <fieldset disabled={readOnly} className="plain">
           <h2>Properties</h2>
-          {!sel && <p className="muted">Select a layer to edit it.</p>}
+          <TabBar label="Property sections" tabs={RIGHT_TABS} value={rightTab} onChange={setRightTab} />
+          <div role="tabpanel" aria-label={RIGHT_TABS.find((t) => t.id === rightTab)?.label}>
+          {!sel && rightTab !== 'scroll' && <p className="muted">Select a layer to edit it.</p>}
           {sel && (
             <>
+              {rightTab === 'layer' && (<>
               <label className="field">
                 <span>Name</span>
                 <input type="text" maxLength={60} value={sel.name} onChange={(e) => patchSel({ name: e.target.value || 'Layer' }, 'name')} />
@@ -977,10 +1035,14 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
               <Slider label="Mobile size multiplier" min={0.2} max={2} step={0.05} value={sel.mobileScale} onChange={(v) => patchSel({ mobileScale: v })} />
               {sel.kind === 'image' && <Slider label="Wing flaps per scroll" min={0} max={60} step={1} value={sel.flapsPerScroll} onChange={(v) => patchSel({ flapsPerScroll: v })} />}
               <Slider label="Body rise & fall" min={0} max={10} step={0.1} value={sel.bob} onChange={(v) => patchSel({ bob: v })} />
+              </>)}
+              {rightTab === 'look' && (<>
               <Triple label="Rotation (°)" min={-180} max={180} step={1} values={three(sel.rotation)} onChange={(v) => patchSel({ rotation: v }, 'rotation')} />
               <Triple label="Scale" min={0.1} max={3} step={0.05} values={three(sel.scale)} onChange={(v) => patchSel({ scale: v }, 'scale')} />
               <Triple label="Opacity" min={0} max={1} step={0.05} values={three(sel.opacity)} onChange={(v) => patchSel({ opacity: v }, 'opacity')} />
               <Triple label="Blur (px)" min={0} max={20} step={0.5} values={three(sel.blur)} onChange={(v) => patchSel({ blur: v }, 'blur')} />
+              </>)}
+              {rightTab === 'timing' && (<>
               <Slider label="Starts at (% of scroll)" min={0} max={95} step={1} value={Math.round(sel.start * 100)} onChange={(v) => patchSel({ start: Math.min(v / 100, sel.end - 0.05) }, 'start')} />
               <Slider label="Ends at (% of scroll)" min={5} max={100} step={1} value={Math.round(sel.end * 100)} onChange={(v) => patchSel({ end: Math.max(v / 100, sel.start + 0.05) }, 'end')} />
               <label className="field">
@@ -1006,6 +1068,8 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
                 </>
               )}
 
+              </>)}
+              {rightTab === 'path' && (<>
               <h3>Motion path</h3>
               <div className="row">
                 <button type="button" className="btn small" onClick={addPoint} disabled={sel.pinned || !!sel.attachTo || sel.path.length >= 24}>Add point</button>
@@ -1021,13 +1085,17 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
                   </label>
                 </div>
               )}
+              </>)}
             </>
           )}
 
+          {rightTab === 'scroll' && (<>
           <h3>Scroll</h3>
           <Slider label="Scroll length (px)" min={300} max={8000} step={50} value={scene.scroll.length} onChange={(v) => commit({ ...scene, scroll: { ...scene.scroll, length: v } }, 'scroll-length')} />
           <Slider label="Smoothing" min={0} max={1} step={0.05} value={scene.scroll.smoothing} onChange={(v) => commit({ ...scene, scroll: { ...scene.scroll, smoothing: v } }, 'smoothing')} />
           <label className="check"><input type="checkbox" checked={scene.scroll.reverse} onChange={(e) => commit({ ...scene, scroll: { ...scene.scroll, reverse: e.target.checked } })} /> Reverse when scrolling up</label>
+          </>)}
+          </div>
           </fieldset>
         </aside>
       </div>
@@ -1081,6 +1149,31 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
             : `Using ${providers.planner.id} · ${providers.backgroundRemover.id} · ${providers.motionFrames.id} · estimated cost: 0 credits`}
         </p>
       </div>
+    </div>
+  );
+}
+
+/** Accessible tab strip: arrow keys, Home and End move between tabs. */
+function TabBar<T extends string>({ label, tabs, value, onChange }: { label: string; tabs: { id: T; label: string }[]; value: T; onChange: (t: T) => void }) {
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const i = tabs.findIndex((t) => t.id === value);
+    let next = -1;
+    if (e.key === 'ArrowRight') next = (i + 1) % tabs.length;
+    else if (e.key === 'ArrowLeft') next = (i - 1 + tabs.length) % tabs.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = tabs.length - 1;
+    if (next < 0) return;
+    e.preventDefault();
+    onChange(tabs[next].id);
+    (e.currentTarget.querySelectorAll('[role=tab]')[next] as HTMLElement | undefined)?.focus();
+  };
+  return (
+    <div role="tablist" aria-label={label} className="tabs" onKeyDown={onKeyDown}>
+      {tabs.map((t) => (
+        <button key={t.id} type="button" role="tab" className="tab" aria-selected={t.id === value} tabIndex={t.id === value ? 0 : -1} onClick={() => onChange(t.id)}>
+          {t.label}
+        </button>
+      ))}
     </div>
   );
 }
