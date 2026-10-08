@@ -220,7 +220,9 @@ describe('image generation and upscaling (mocked HTTP; not verified against the 
   it('lists which tools the server offers', async () => {
     const bare = await setup({});
     const tools = (await bare.call('GET', '/api/modes', undefined, bare.u.cookie)).body.tools;
-    expect(tools.map((t: { kind: string; available: boolean }) => [t.kind, t.available])).toEqual([['image-gen', false], ['upscale', false]]);
+    // upscaling is always offered (with the user's own Replicate key); image generation needs a provider
+    expect(tools.map((t: { kind: string; available: boolean }) => [t.kind, t.available])).toEqual([['image-gen', false], ['upscale', true]]);
+    expect(tools[1]).toMatchObject({ platformKey: false });
     expect((await bare.call('POST', '/api/jobs', gen(bare.pid, 'tool-key-0001'), bare.u.cookie)).status).toBe(501);
 
     const full = await setup({ OPENAI_IMAGE_MODEL: 'img-model', OPENAI_API_KEY: 'sk-platform', REPLICATE_UPSCALE_VERSION: 'upver1234567', REPLICATE_API_TOKEN: 'r8_platform' });
