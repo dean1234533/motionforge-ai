@@ -79,6 +79,7 @@
       scale: sampleArray(obj.scale, t),
       opacity: clamp(sampleArray(obj.opacity, t), 0, 1),
       blur: Math.max(0, sampleArray(obj.blur || [0], t)),
+      t: t,
       phase: raw * (obj.flapsPerScroll || 0),
       cycle: obj.effect ? raw * obj.effect.loops : 0
     };
@@ -269,6 +270,20 @@
     ctx.restore();
   }
 
+  var SVGNS = 'http://www.w3.org/2000/svg';
+
+  // The curve a line draws, as an SVG path in 0-100 stage units.
+  function pathD(path) {
+    var a = path.slice().sort(function (p, q) { return p.progress - q.progress; });
+    var first = a[0].progress, last = a[a.length - 1].progress;
+    var d = '';
+    for (var i = 0; i <= 60; i++) {
+      var p = samplePath(a, first + (last - first) * i / 60);
+      d += (i ? 'L' : 'M') + p.x.toFixed(2) + ' ' + p.y.toFixed(2);
+    }
+    return d;
+  }
+
   function mount(host, config, options) {
     options = options || {};
     var scene = config.scene;
@@ -326,6 +341,86 @@
       effectsMode = want;
     }
     syncRenderer();
+
+    // Simple shapes are HTML/CSS elements and lines are SVG, each in a layer behind or in front of the canvas.
+    var domBack = document.createElement('div'), domFront = document.createElement('div');
+    var domCss = 'position:absolute;inset:0;pointer-events:none;overflow:hidden;';
+    domBack.style.cssText = domCss;
+    domFront.style.cssText = domCss;
+    domBack.setAttribute('aria-hidden', 'true');
+    domFront.setAttribute('aria-hidden', 'true');
+    stage.insertBefore(domBack, stage.firstChild);
+    stage.appendChild(domFront);
+    var domNodes = [];
+    var usesHtml = false, usesSvg = false;
+
+    function buildDom() {
+      domBack.innerHTML = '';
+      domFront.innerHTML = '';
+      domNodes = [];
+      usesHtml = usesSvg = false;
+      var svgs = {};
+      function svgFor(layerName) {
+        if (!svgs[layerName]) {
+          var s = document.createElementNS(SVGNS, 'svg');
+          s.setAttribute('viewBox', '0 0 100 100');
+          s.setAttribute('preserveAspectRatio', 'none');
+          s.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;overflow:visible;';
+          (layerName === 'back' ? domBack : domFront).appendChild(s);
+          svgs[layerName] = s;
+        }
+        return svgs[layerName];
+      }
+      for (var i = 0; i < scene.objects.length; i++) {
+        var o = scene.objects[i];
+        if (o.shape) {
+          var el = document.createElement('div');
+          el.className = 'mf-shape';
+          el.style.cssText = 'position:absolute;left:0;top:0;will-change:transform,opacity;background:' + o.shape.color + ';' +
+            'width:' + o.shape.widthPct + '%;height:' + o.shape.heightPct + '%;' +
+            'border-radius:' + (o.shape.type === 'circle' ? '50%' : o.shape.radius + '%') + ';';
+          (o.shape.layer === 'back' ? domBack : domFront).appendChild(el);
+          domNodes.push({ obj: o, el: el, shape: true });
+          usesHtml = true;
+        } else if (o.line) {
+          var src = (o.attachTo && byId[o.attachTo]) ? byId[o.attachTo].path : o.path;
+          var pe = document.createElementNS(SVGNS, 'path');
+          pe.setAttribute('d', pathD(src));
+          pe.setAttribute('fill', 'none');
+          pe.setAttribute('stroke', o.line.color);
+          pe.setAttribute('stroke-width', String(o.line.width));
+          pe.setAttribute('stroke-linecap', o.line.cap);
+          pe.setAttribute('stroke-linejoin', 'round');
+          pe.setAttribute('vector-effect', 'non-scaling-stroke');
+          if (o.line.reveal === 'draw') pe.setAttribute('pathLength', '1');
+          else if (o.line.dash > 0) pe.setAttribute('stroke-dasharray', o.line.dash + ' ' + o.line.dash);
+          svgFor(o.line.layer).appendChild(pe);
+          domNodes.push({ obj: o, el: pe, shape: false });
+          usesSvg = true;
+        }
+      }
+    }
+    buildDom();
+
+    function updateDom(mobile) {
+      for (var i = 0; i < domNodes.length; i++) {
+        var n = domNodes[i], o = n.obj, st = evaluate(o, shown, lookup);
+        if (n.shape) {
+          var sc = st.scale * (mobile ? o.mobileScale : 1);
+          n.el.style.left = st.x + '%';
+          n.el.style.top = st.y + '%';
+          n.el.style.transform = 'translate(-50%,-50%) rotate(' + st.rotation + 'deg) scale(' + sc + ')';
+          n.el.style.opacity = String(st.opacity);
+          n.el.style.filter = st.blur > 0 ? 'blur(' + st.blur + 'px)' : 'none';
+        } else {
+          n.el.style.opacity = String(st.opacity);
+          if (o.line.reveal === 'draw') {
+            n.el.style.strokeDasharray = '1';
+            n.el.style.strokeDashoffset = String(1 - st.t);
+          }
+        }
+      }
+    }
 
     var imgs = {};
     var loaded = false;
@@ -433,6 +528,7 @@
         glBack.draw(back, w, h, dpr);
         glFront.draw(front, w, h, dpr);
       }
+      updateDom(mobile);
     }
 
     function onResize() { layout(); onScroll(); requestDraw(); }
@@ -454,9 +550,9 @@
     requestDraw();
 
     return {
-      update: function (newScene) { scene = newScene; index(); syncRenderer(); layout(); onScroll(); requestDraw(); },
+      update: function (newScene) { scene = newScene; index(); syncRenderer(); buildDom(); layout(); onScroll(); requestDraw(); },
       getProgress: function () { return shown; },
-      info: function () { return { effects: effectsMode }; },
+      info: function () { return { effects: effectsMode, shapes: usesHtml ? 'html' : null, lines: usesSvg ? 'svg' : null }; },
       destroy: function () {
         g.removeEventListener('scroll', onScroll);
         g.removeEventListener('resize', onResize);
