@@ -1,4 +1,6 @@
 import { clearCookie, createSession, getUser, login, logout, rateLimit, sessionCookie, signup, validateCredentials } from './auth';
+import { deleteAsset, getJobFile, listAssets, readAsset, readFrames, saveAsset, saveFrames, MAX_ASSET_BYTES, MAX_FRAMES_BYTES } from './assets';
+import { billingSummary, createCheckout, createPortal, handleStripeEvent, verifyStripeSignature } from './billing';
 import { balance, ensureMonthlyGrant } from './credits';
 import { HttpError, json, readJson } from './http';
 import { cancelJob, createJob, estimate, getJob, jobView, listJobs, retryJob, runJob } from './jobs';
@@ -6,10 +8,13 @@ import { listKeys, removeKey, saveKey, testKey } from './keys';
 import { createProject, deleteProject, getProject, listExports, listProjects, listVersions, logExport, restoreVersion, updateProject } from './projects';
 import { defaultProviders } from './providers';
 import type { ProviderRegistry } from './providers';
+import { providersFromEnv } from './replicate';
+import { createShare, getShared, listShares, revokeShare } from './shares';
 import type { Env, UserRow } from './types';
 
 export interface Deps {
-  providers: ProviderRegistry;
+  /** Overrides the registry (tests). By default it is built from the environment. */
+  providers?: ProviderRegistry;
   fetchFn: typeof fetch;
 }
 
@@ -17,7 +22,9 @@ export interface Ctx {
   waitUntil(p: Promise<unknown>): void;
 }
 
-const defaults: Deps = { providers: defaultProviders, fetchFn: (...a) => fetch(...a) };
+const defaults: Deps = { fetchFn: (...a) => fetch(...a) };
+
+export const resolveProviders = (env: Env, deps: Deps): ProviderRegistry => deps.providers ?? providersFromEnv(env, deps.fetchFn, defaultProviders);
 
 function secure(res: Response): Response {
   res.headers.set('x-content-type-options', 'nosniff');
@@ -35,13 +42,37 @@ export async function handle(req: Request, env: Env, deps: Deps = defaults, ctx?
   }
 }
 
+async function readBytes(req: Request, max: number): Promise<Uint8Array> {
+  const declared = Number(req.headers.get('content-length') ?? 0);
+  if (declared > max) throw new HttpError(413, 'That upload is too large.');
+  const bytes = new Uint8Array(await req.arrayBuffer());
+  if (bytes.length > max) throw new HttpError(413, 'That upload is too large.');
+  return bytes;
+}
+
+const bin = (bytes: Uint8Array, type: string, cache = 'private, max-age=300') =>
+  new Response(bytes as unknown as BodyInit, { headers: { 'content-type': type, 'cache-control': cache, 'content-security-policy': "default-src 'none'" } });
+
 async function route(req: Request, env: Env, deps: Deps, ctx?: Ctx): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
   const method = req.method;
   const db = env.DB;
+  const providers = resolveProviders(env, deps);
+  const ip = req.headers.get('cf-connecting-ip') ?? 'local';
 
   if (!path.startsWith('/api/')) throw new HttpError(404, 'Not found.');
+  if (path === '/api/health') return json({ ok: true });
+
+  // Stripe calls this itself, so it cannot send our CSRF header. The signature is the authentication.
+  if (path === '/api/webhooks/stripe' && method === 'POST') {
+    if (!env.STRIPE_WEBHOOK_SECRET) throw new HttpError(501, 'Billing is not configured yet.');
+    const payload = await req.text();
+    if (payload.length > 1_000_000) throw new HttpError(413, 'Too large.');
+    if (!(await verifyStripeSignature(payload, req.headers.get('stripe-signature'), env.STRIPE_WEBHOOK_SECRET))) throw new HttpError(400, 'Invalid signature.');
+    await handleStripeEvent(db, JSON.parse(payload));
+    return json({ received: true });
+  }
 
   // CSRF: browsers cannot send this custom header cross-site without a CORS preflight, which we never allow.
   if (method !== 'GET' && method !== 'HEAD') {
@@ -50,9 +81,21 @@ async function route(req: Request, env: Env, deps: Deps, ctx?: Ctx): Promise<Res
     if (origin && env.ALLOWED_ORIGIN && origin !== env.ALLOWED_ORIGIN) throw new HttpError(403, 'Origin not allowed.');
   }
 
-  const ip = req.headers.get('cf-connecting-ip') ?? 'local';
-
-  if (path === '/api/health') return json({ ok: true });
+  // Public, read-only shared projects.
+  let m = path.match(/^\/api\/share\/([A-Za-z0-9_-]{16,64})(?:\/assets\/([a-z0-9-]{1,40})(\/frames)?)?$/);
+  if (m && method === 'GET') {
+    await rateLimit(db, `share:${ip}`, 240, 60);
+    const shared = await getShared(env, m[1]);
+    if (!m[2]) return json(shared.view);
+    if (m[3]) {
+      const frames = await readFrames(env, shared.ownerId, shared.projectId, m[2]);
+      if (!frames) throw new HttpError(404, 'No frames.');
+      return bin(new TextEncoder().encode(frames), 'application/json');
+    }
+    const a = await readAsset(env, shared.ownerId, shared.projectId, m[2]);
+    if (!a) throw new HttpError(404, 'Image not found.');
+    return bin(a.bytes, a.type);
+  }
 
   if (path === '/api/auth/signup' && method === 'POST') {
     await rateLimit(db, `signup:${ip}`, 10, 3600);
@@ -85,9 +128,17 @@ async function route(req: Request, env: Env, deps: Deps, ctx?: Ctx): Promise<Res
     return json({ user, credits: await balance(db, user.id) });
   }
 
+  // --- billing ---
+  if (path === '/api/billing' && method === 'GET') return json(await billingSummary(env, user.id, user.plan));
+  if (path === '/api/billing/checkout' && method === 'POST') {
+    await rateLimit(db, `checkout:${user.id}`, 10, 3600);
+    return json(await createCheckout(env, deps.fetchFn, user, (await readJson(req)).plan));
+  }
+  if (path === '/api/billing/portal' && method === 'POST') return json(await createPortal(env, deps.fetchFn, user.id));
+
   // --- keys ---
   if (path === '/api/keys' && method === 'GET') return json({ keys: await listKeys(db, user.id) });
-  let m = path.match(/^\/api\/keys\/([a-z]+)(\/test)?$/);
+  m = path.match(/^\/api\/keys\/([a-z]+)(\/test)?$/);
   if (m) {
     const provider = m[1];
     if (m[2] && method === 'POST') {
@@ -110,10 +161,11 @@ async function route(req: Request, env: Env, deps: Deps, ctx?: Ctx): Promise<Res
     const b = await readJson(req);
     return json({ project: await createProject(db, user.id, b.name, b.scene) }, 201);
   }
-  m = path.match(/^\/api\/projects\/([0-9a-f-]{36})(?:\/(versions|exports)(?:\/(\d+)\/restore)?)?$/);
+  m = path.match(/^\/api\/projects\/([0-9a-f-]{36})(?:\/(versions|exports|assets|shares)(?:\/([A-Za-z0-9_-]+))?(?:\/(restore|frames))?)?$/);
   if (m) {
     const id = m[1];
-    if (!m[2]) {
+    const [, , kind, sub, action] = m;
+    if (!kind) {
       if (method === 'GET') return json({ project: await getProject(db, user.id, id) });
       if (method === 'PUT') {
         const b = await readJson(req);
@@ -123,22 +175,65 @@ async function route(req: Request, env: Env, deps: Deps, ctx?: Ctx): Promise<Res
         await deleteProject(db, user.id, id);
         return json({ ok: true });
       }
-    } else if (m[2] === 'versions') {
-      if (method === 'GET' && !m[3]) return json({ versions: await listVersions(db, user.id, id) });
-      if (method === 'POST' && m[3]) return json({ project: await restoreVersion(db, user.id, id, Number(m[3])) });
-    } else if (m[2] === 'exports') {
-      if (method === 'GET') return json({ exports: await listExports(db, user.id, id) });
-      if (method === 'POST') {
+    } else if (kind === 'versions') {
+      if (method === 'GET' && !sub) return json({ versions: await listVersions(db, user.id, id) });
+      if (method === 'POST' && sub && action === 'restore') return json({ project: await restoreVersion(db, user.id, id, Number(sub)) });
+    } else if (kind === 'exports') {
+      if (method === 'GET' && !sub) return json({ exports: await listExports(db, user.id, id) });
+      if (method === 'POST' && !sub) {
         await logExport(db, user.id, id, (await readJson(req)).format);
         return json({ ok: true }, 201);
+      }
+    } else if (kind === 'shares') {
+      if (method === 'GET' && !sub) return json({ shares: await listShares(env, user.id, id) });
+      if (method === 'POST' && !sub) {
+        await rateLimit(db, `share-create:${user.id}`, 30, 3600);
+        return json(await createShare(env, user.id, id), 201);
+      }
+      if (method === 'DELETE' && sub) {
+        await revokeShare(env, user.id, sub);
+        return json({ ok: true });
+      }
+    } else if (kind === 'assets') {
+      if (method === 'GET' && !sub) return json({ assets: await listAssets(env, user.id, id) });
+      if (sub && !action) {
+        if (method === 'PUT') {
+          await rateLimit(db, `upload:${user.id}`, 120, 3600);
+          const name = url.searchParams.get('name') ?? 'image';
+          await saveAsset(env, user.id, id, sub, name, await readBytes(req, MAX_ASSET_BYTES));
+          return json({ ok: true }, 201);
+        }
+        if (method === 'GET') {
+          const a = await readAsset(env, user.id, id, sub);
+          if (!a) throw new HttpError(404, 'Image not found.');
+          return bin(a.bytes, a.type);
+        }
+        if (method === 'DELETE') {
+          await deleteAsset(env, user.id, id, sub);
+          return json({ ok: true });
+        }
+      }
+      if (sub && action === 'frames') {
+        if (method === 'PUT') {
+          await saveFrames(env, user.id, id, sub, new TextDecoder().decode(await readBytes(req, MAX_FRAMES_BYTES)));
+          return json({ ok: true }, 201);
+        }
+        if (method === 'GET') {
+          const f = await readFrames(env, user.id, id, sub);
+          if (!f) throw new HttpError(404, 'No frames.');
+          return bin(new TextEncoder().encode(f), 'application/json');
+        }
       }
     }
   }
 
   // --- generation ---
   if (path === '/api/estimate' && method === 'GET') {
-    const e = estimate(url.searchParams.get('mode') ?? '', deps.providers);
+    const e = estimate(url.searchParams.get('mode') ?? '', providers);
     return json({ ...e, balance: await balance(db, user.id) });
+  }
+  if (path === '/api/modes' && method === 'GET') {
+    return json({ modes: (['free', 'fast', 'professional', 'byok'] as const).map((mode) => estimate(mode, providers)), balance: await balance(db, user.id) });
   }
   if (path === '/api/jobs' && method === 'GET') {
     const projectId = url.searchParams.get('projectId');
@@ -147,17 +242,23 @@ async function route(req: Request, env: Env, deps: Deps, ctx?: Ctx): Promise<Res
   }
   if (path === '/api/jobs' && method === 'POST') {
     await rateLimit(db, `jobs:${user.id}`, 30, 3600);
-    const { job, created } = await createJob(db, env, deps.providers, user.id, await readJson(req));
-    if (created) ctx?.waitUntil(runJob(db, env, deps.providers, job.id));
+    const { job, created } = await createJob(db, env, providers, user.id, await readJson(req));
+    if (created) ctx?.waitUntil(runJob(db, env, providers, job.id));
     return json({ job: jobView(job), credits: await balance(db, user.id) }, created ? 202 : 200);
   }
-  m = path.match(/^\/api\/jobs\/([0-9a-f-]{36})(?:\/(retry|cancel))?$/);
+  m = path.match(/^\/api\/jobs\/([0-9a-f-]{36})(?:\/(retry|cancel|video))?$/);
   if (m) {
     const id = m[1];
     if (!m[2] && method === 'GET') return json({ job: jobView(await getJob(db, user.id, id)) });
+    if (m[2] === 'video' && method === 'GET') {
+      await getJob(db, user.id, id);
+      const v = await getJobFile(env, id, 'video.mp4');
+      if (!v) throw new HttpError(404, 'No video.');
+      return bin(v.bytes, v.type);
+    }
     if (m[2] === 'retry' && method === 'POST') {
       await retryJob(db, user.id, id);
-      ctx?.waitUntil(runJob(db, env, deps.providers, id));
+      ctx?.waitUntil(runJob(db, env, providers, id));
       return json({ job: jobView(await getJob(db, user.id, id)) }, 202);
     }
     if (m[2] === 'cancel' && method === 'POST') {
