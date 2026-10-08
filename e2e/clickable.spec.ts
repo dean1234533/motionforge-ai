@@ -18,6 +18,17 @@ test('in the editor, the device tabs, mode menu and toolbar respond to clicks', 
   await page.waitForTimeout(500);
   expect(await findObscured(page), 'covered controls in the editor').toEqual([]);
 
+  // every editing tab opens, and nothing on any of them is covered by something else
+  for (const name of ['Media', 'Add', 'Layers']) {
+    await page.getByRole('tab', { name, exact: true }).click();
+    expect(await findObscured(page), `covered controls on the ${name} tab`).toEqual([]);
+  }
+  for (const name of ['Layer', 'Look', 'Timing', 'Path', 'Scroll']) {
+    await page.getByRole('tab', { name, exact: true }).click();
+    expect(await findObscured(page), `covered controls on the ${name} tab`).toEqual([]);
+  }
+  await page.getByRole('tab', { name: 'Media', exact: true }).click();
+
   // the Desktop / Tablet / Mobile tabs really change the preview
   const frame = page.locator('.frame');
   for (const [name, expected] of [['Tablet', 768], ['Mobile', 390]] as const) {
