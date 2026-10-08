@@ -63,7 +63,9 @@ details { background: var(--panel); border: 1px solid var(--border); border-radi
 summary { cursor: pointer; font-weight: 600; }
 
 /* editor */
-.editor { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto auto; height: 100vh; }
+.editor { display: flex; flex-direction: column; height: 100vh; }
+.editor > * { flex: none; }
+.editor > .ed-main { flex: 1 1 0; min-height: 0; }
 .ed-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--panel); flex-wrap: wrap; }
 .ed-top-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ed-top select { width: auto; }
