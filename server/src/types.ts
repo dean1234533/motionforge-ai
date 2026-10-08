@@ -36,6 +36,10 @@ export interface Env {
   /** Replicate model version ids for each mode. */
   REPLICATE_FAST_VERSION?: string;
   REPLICATE_PRO_VERSION?: string;
+  /** Invitation emails (Resend). Both are needed; without them owners share invite links by hand. */
+  RESEND_API_KEY?: string;
+  /** For example: "MotionForge <team@yourdomain.com>" (the domain must be verified with Resend). */
+  MAIL_FROM?: string;
   /** Name of the model's image input field (varies by model). */
   REPLICATE_IMAGE_FIELD?: string;
   /** Replicate upscaling model version, and its input field names. */
