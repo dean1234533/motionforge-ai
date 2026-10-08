@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { readFileSync } from 'node:fs';
+import { ensureSchema } from '../../server/src/schema';
 import { resumeJobs } from '../../server/src/jobs';
 import { handle, resolveRegistry } from '../../server/src/router';
 import type { Deps } from '../../server/src/router';
@@ -55,7 +55,6 @@ export const SECRET = Buffer.alloc(32, 7).toString('base64');
 export function makeApp(deps: Partial<Deps> = {}, envExtra: Partial<Env> = {}) {
   const sqlite = new Database(':memory:');
   sqlite.pragma('foreign_keys = ON');
-  for (const f of ['0001_init.sql', '0002_assets_sharing_billing.sql', '0003_teams_tools.sql']) sqlite.exec(readFileSync(`server/migrations/${f}`, 'utf8'));
   const files = fakeR2();
   const env: Env = { DB: sqliteD1(sqlite), FILES: files, KEY_ENCRYPTION_SECRET: SECRET, ...envExtra };
   const pending: Promise<unknown>[] = [];
