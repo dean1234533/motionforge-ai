@@ -7,6 +7,7 @@ import type { GenerationMode } from '../ai/providers';
 import { PathOverlay } from '../editor/PathOverlay';
 import { useHistory } from '../editor/useHistory';
 import { buildPreviewHtml, buildSnippet, buildStandaloneHtml, buildZip } from '../export/build';
+import type { ExportOptions } from '../export/build';
 import { sanitizeFilename, sanitizeText, slug, validateUpload } from '../lib/sanitize';
 import { EFFECT_LABELS, emptyScene, newEffect, newLine, newObject, newShape } from '../scene/defaults';
 import { EASINGS, EFFECT_TYPES, parseScene } from '../scene/schema';
@@ -123,6 +124,9 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
   const sel: SceneObject | null = scene.objects.find((o) => o.id === selectedId) ?? scene.objects[0] ?? null;
   const providers = getProviders(mode);
   const session = useSession();
+  const paidPlan = session.user?.plan === 'creator' || session.user?.plan === 'professional';
+  /** Paid plans get higher-resolution frames. */
+  const frameSide = paidPlan ? 1024 : 512;
   const [serverModes, setServerModes] = useState<ModeInfo[]>([]);
   const [showShare, setShowShare] = useState(false);
   const aborted = useRef(false);
@@ -192,7 +196,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
               const fr = await fetch(`/api/projects/${projectId}/assets/${a.id}/frames`, { credentials: 'same-origin' });
               if (fr.ok) frames = (await fr.json()) as string[];
             }
-            restored.push({ id: a.id, name: a.name, source, hd: a.hd, frames: frames ?? (await buildAsset(source, () => undefined, a.hd ? 1024 : 512)).frames });
+            restored.push({ id: a.id, name: a.name, source, hd: a.hd, frames: frames ?? (await buildAsset(source, () => undefined, a.hd || paidPlan ? 1024 : 512)).frames });
           }
           if (cancelled) return;
           setAssets(restored);
@@ -308,7 +312,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     const attempt = async (): Promise<void> => {
       try {
         setJob({ stage: 'Preparing image' });
-        const built = await buildAsset(source, (s) => setJob({ stage: s }));
+        const built = await buildAsset(source, (s) => setJob({ stage: s }), frameSide);
         setJob({ stage: 'Building preview' });
         await wait(250);
         const id = replaceId ?? uid(name);
@@ -1191,13 +1195,23 @@ function ExportView({ scene, assets, projectId, onBack }: { scene: Scene; assets
   const logExport = (format: string) => {
     if (projectId) api('POST', `/api/projects/${projectId}/exports`, { format }).catch(() => undefined);
   };
+  const { user } = useSession();
+  const plan = user?.plan ?? 'none';
+  const paid = plan === 'creator' || plan === 'professional';
+  const pro = plan === 'professional';
+  const [light, setLight] = useState(false);
+  // Free and account-less exports carry a small badge; paid plans do not. Professional can thin the frames.
+  const options = useMemo<ExportOptions>(
+    () => ({ watermarkUrl: paid ? null : `${window.location.origin}${window.location.pathname}`, frameStep: pro && light ? 2 : 1, commercial: pro }),
+    [paid, pro, light],
+  );
   const input = useMemo(() => ({ scene, assets }), [scene, assets]);
-  const html = useMemo(() => buildStandaloneHtml(input), [input]);
+  const html = useMemo(() => buildStandaloneHtml(input, options), [input, options]);
   const kb = Math.round(html.length / 1024);
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(buildSnippet(input));
+      await navigator.clipboard.writeText(buildSnippet(input, 'motionforge-1', options));
       logExport('snippet');
       setMsg('Embed snippet copied.');
     } catch {
@@ -1218,9 +1232,15 @@ function ExportView({ scene, assets, projectId, onBack }: { scene: Scene; assets
           <div className="row wrap">
             <button type="button" className="btn primary" onClick={() => { logExport('html'); download('motionforge-animation.html', html, 'text/html'); }}>Download standalone HTML</button>
             <button type="button" className="btn" onClick={() => void copy()}>Copy embed snippet</button>
-            <button type="button" className="btn" onClick={() => { logExport('zip'); download('motionforge-bundle.zip', buildZip(input) as unknown as BlobPart, 'application/zip'); }}>Download self-host ZIP</button>
+            <button type="button" className="btn" onClick={() => { logExport('zip'); download('motionforge-bundle.zip', buildZip(input, options) as unknown as BlobPart, 'application/zip'); }}>Download self-host ZIP</button>
           </div>
           <p role="status" className="muted">{msg || `Standalone file size: about ${kb} KB.`}</p>
+          {!paid && <p className="muted small-note">Free exports include a small “Made with MotionForge” badge. Creator and Professional plans remove it and use sharper 1024 px frames.</p>}
+          {pro ? (
+            <label className="check"><input type="checkbox" checked={light} onChange={(e) => setLight(e.target.checked)} /> Lighter files (use every other frame)</label>
+          ) : (
+            <p className="muted small-note">Advanced export options (lighter files, commercial licence) are part of the Professional plan.</p>
+          )}
 
           <h2>Install</h2>
           <details open>
