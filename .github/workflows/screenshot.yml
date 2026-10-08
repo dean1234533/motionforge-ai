@@ -24,17 +24,25 @@ jobs:
           import { chromium, devices } from 'playwright';
           const url = process.env.URL.replace(/\/$/, '');
           const b = await chromium.launch();
-          const pages = [['landing', '/'], ['login', '/#/login'], ['editor', '/#/editor'], ['docs', '/#/docs']];
-          for (const [name, ctxOpts] of [['desktop', { viewport: { width: 1280, height: 800 } }], ['phone', { ...devices['Pixel 5'] }]]) {
-            const ctx = await b.newContext(ctxOpts);
+          for (const [name, opts] of [['desktop', { viewport: { width: 1280, height: 800 } }], ['phone', { ...devices['Pixel 5'] }]]) {
+            const ctx = await b.newContext(opts);
             const page = await ctx.newPage();
-            for (const [n, path] of pages) {
-              await page.goto(url + path, { waitUntil: 'networkidle' });
-              await page.waitForTimeout(1500);
-              await page.screenshot({ path: `shots/${name}-${n}.png`, fullPage: false });
-            }
-            const info = await page.evaluate(() => ({ title: document.title, version: document.body.innerText.match(/Version \w+/)?.[0] ?? null, scripts: [...document.scripts].map(s => s.src), css: [...document.querySelectorAll('link[rel=stylesheet]')].map(l => l.href) }));
-            console.log(name, JSON.stringify(info));
+            await page.goto(url + '/', { waitUntil: 'networkidle' });
+            await page.waitForTimeout(2500);
+            await page.screenshot({ path: `shots/${name}-1-landing-top.png` });
+            await page.screenshot({ path: `shots/${name}-2-landing-full.png`, fullPage: true });
+            await page.goto(url + '/#/login', { waitUntil: 'networkidle' });
+            await page.waitForTimeout(500);
+            await page.screenshot({ path: `shots/${name}-3-login.png` });
+            await page.goto(url + '/#/editor', { waitUntil: 'networkidle' });
+            await page.getByRole('button', { name: 'Use sample bird' }).click();
+            await page.waitForSelector('.frame iframe', { timeout: 60000 });
+            await page.waitForTimeout(2500);
+            await page.screenshot({ path: `shots/${name}-4-editor.png` });
+            await page.screenshot({ path: `shots/${name}-5-editor-full.png`, fullPage: true });
+            await page.goto(url + '/#/docs', { waitUntil: 'networkidle' });
+            await page.waitForTimeout(500);
+            await page.screenshot({ path: `shots/${name}-6-docs.png` });
             await ctx.close();
           }
           await b.close();
