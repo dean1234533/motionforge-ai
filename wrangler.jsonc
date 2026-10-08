@@ -12,6 +12,9 @@
   // No IDs or setup needed: Wrangler creates the database on the first deploy, and the Worker creates its
   // own tables the first time it runs. Uploaded images are stored in that database.
   "d1_databases": [{ "binding": "DB", "database_name": "motionforge" }],
+  // Cloudflare's built-in AI: image generation and understanding prompts. No key or account needed;
+  // it is billed to your Cloudflare account (there is a free daily allowance).
+  "ai": { "binding": "AI" },
   // Optional: to keep images in an R2 bucket instead, create a bucket in the dashboard and add
   //   "r2_buckets": [{ "binding": "FILES", "bucket_name": "your-bucket-name" }],
   // Resumes generation jobs that are waiting on an AI provider.
