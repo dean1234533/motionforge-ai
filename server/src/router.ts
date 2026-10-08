@@ -216,7 +216,7 @@ async function route(req: Request, env: Env, deps: Deps, ctx?: Ctx): Promise<Res
   if (path === '/api/projects' && method === 'GET') return json({ projects: await listProjects(db, user.id) });
   if (path === '/api/projects' && method === 'POST') {
     const b = await readJson(req);
-    return json({ project: await createProject(db, user.id, b.name, b.scene, b.teamId) }, 201);
+    return json({ project: await createProject(db, user, b.name, b.scene, b.teamId) }, 201);
   }
   m = path.match(/^\/api\/projects\/([0-9a-f-]{36})(?:\/(versions|exports|assets|shares)(?:\/([A-Za-z0-9_-]+))?(?:\/(restore|frames))?)?$/);
   if (m) {
