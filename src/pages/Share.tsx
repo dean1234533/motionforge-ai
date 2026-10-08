@@ -5,7 +5,7 @@ import { parseScene } from '../scene/schema';
 interface SharedView {
   name: string;
   scene: unknown;
-  assets: { id: string; hasFrames: boolean }[];
+  assets: { id: string; hasFrames: boolean; hd?: boolean }[];
 }
 
 /** Public, read-only page for a shared project. No account needed. */
@@ -38,7 +38,7 @@ export function Share({ token }: { token: string }) {
           if (!img.ok) continue;
           const blob = await img.blob();
           const source = await readFileAsDataUrl(new File([blob], a.id, { type: blob.type }));
-          assets[a.id] = (await buildAsset(source, () => undefined)).frames;
+          assets[a.id] = (await buildAsset(source, () => undefined, a.hd ? 1024 : 512)).frames;
         }
         if (cancelled || !host.current) return;
         controller = window.MotionForge.mount(host.current, { scene: parsed.scene, assets });
