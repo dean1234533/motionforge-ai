@@ -74,7 +74,8 @@ addEventListener("message", function (e) {
   if (d.type === "mf-scroll") scrollTo(0, d.y);
 });
 addEventListener("scroll", function () {
-  parent.postMessage({ type: "mf-progress", p: ctl.getProgress() }, "*");
+  var max = document.documentElement.scrollHeight - innerHeight;
+  parent.postMessage({ type: "mf-progress", p: max > 0 ? Math.min(1, scrollY / max) : 0 }, "*");
 }, { passive: true });
 </script>
 </body>
