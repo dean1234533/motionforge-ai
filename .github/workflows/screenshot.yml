@@ -1,0 +1,46 @@
+name: Screenshot
+# Takes pictures of a live address so the design can be checked. Run it from the Actions tab.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Address to photograph
+        default: https://motionforge-ai.deanatthrive.workers.dev/
+jobs:
+  shots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm init -y >/dev/null && npm install playwright@1.48.2 >/dev/null
+      - run: npx playwright install --with-deps chromium >/dev/null
+      - name: Take screenshots
+        env:
+          URL: ${{ inputs.url }}
+        run: |
+          mkdir shots
+          cat > shot.mjs <<'JS'
+          import { chromium, devices } from 'playwright';
+          const url = process.env.URL.replace(/\/$/, '');
+          const b = await chromium.launch();
+          const pages = [['landing', '/'], ['login', '/#/login'], ['editor', '/#/editor'], ['docs', '/#/docs']];
+          for (const [name, ctxOpts] of [['desktop', { viewport: { width: 1280, height: 800 } }], ['phone', { ...devices['Pixel 5'] }]]) {
+            const ctx = await b.newContext(ctxOpts);
+            const page = await ctx.newPage();
+            for (const [n, path] of pages) {
+              await page.goto(url + path, { waitUntil: 'networkidle' });
+              await page.waitForTimeout(1500);
+              await page.screenshot({ path: `shots/${name}-${n}.png`, fullPage: false });
+            }
+            const info = await page.evaluate(() => ({ title: document.title, version: document.body.innerText.match(/Version \w+/)?.[0] ?? null, scripts: [...document.scripts].map(s => s.src), css: [...document.querySelectorAll('link[rel=stylesheet]')].map(l => l.href) }));
+            console.log(name, JSON.stringify(info));
+            await ctx.close();
+          }
+          await b.close();
+          JS
+          node shot.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shots
+          path: shots
