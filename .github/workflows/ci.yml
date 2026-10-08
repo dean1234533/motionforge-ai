@@ -42,8 +42,9 @@ jobs:
           node-version: 20
       - run: npm install
       - run: npx playwright install --with-deps chromium
-      - run: npm run build
+      - run: npx vite build --mode development
         env:
+          NODE_ENV: development
           MF_NO_MINIFY: '1'
       - run: npx playwright test -c playwright.cloud.config.ts
       - uses: actions/upload-artifact@v4
