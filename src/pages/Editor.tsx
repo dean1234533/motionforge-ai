@@ -680,7 +680,7 @@ function ExportView({ scene, assets, onBack }: { scene: Scene; assets: Record<st
           <div className="row wrap">
             <button type="button" className="btn primary" onClick={() => download('motionforge-animation.html', html, 'text/html')}>Download standalone HTML</button>
             <button type="button" className="btn" onClick={() => void copy()}>Copy embed snippet</button>
-            <button type="button" className="btn" onClick={() => download('motionforge-bundle.zip', buildZip(input), 'application/zip')}>Download self-host ZIP</button>
+            <button type="button" className="btn" onClick={() => download('motionforge-bundle.zip', buildZip(input) as unknown as BlobPart, 'application/zip')}>Download self-host ZIP</button>
           </div>
           <p role="status" className="muted">{msg || `Standalone file size: about ${kb} KB.`}</p>
 
