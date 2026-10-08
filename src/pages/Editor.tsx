@@ -317,7 +317,9 @@ export function Editor({ initialPrompt }: { initialPrompt: string }) {
     if (!sel) return;
     const p = [...sel.path].sort((a, b) => a.progress - b.progress);
     let gap = 0;
-    for (let i = 1; i < p.length; i++) if (p[i].progress - p[i - 1].progress > p[gap + 1 < p.length ? gap + 1 : 1].progress - p[gap].progress) gap = i - 1;
+    for (let i = 1; i < p.length - 1; i++) {
+      if (p[i + 1].progress - p[i].progress > p[gap + 1].progress - p[gap].progress) gap = i;
+    }
     const mid = (p[gap].progress + p[gap + 1].progress) / 2;
     const pos = window.MotionForge.samplePath(p, mid);
     p.splice(gap + 1, 0, { progress: Math.round(mid * 1000) / 1000, x: Math.round(pos.x * 10) / 10, y: Math.round(pos.y * 10) / 10 });
