@@ -5,6 +5,8 @@ export type Stage =
   | 'Preparing image'
   | 'Removing background'
   | 'Generating motion'
+  | 'Generating image'
+  | 'Upscaling'
   | 'Processing frames'
   | 'Optimising assets'
   | 'Building preview'
@@ -33,10 +35,10 @@ export function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-function toCanvas(img: HTMLImageElement): HTMLCanvasElement {
+function toCanvas(img: HTMLImageElement, maxSide: number): HTMLCanvasElement {
   const w0 = img.naturalWidth || img.width || 1;
   const h0 = img.naturalHeight || img.height || 1;
-  const k = Math.min(1, MAX_SIDE / Math.max(w0, h0));
+  const k = Math.min(1, maxSide / Math.max(w0, h0));
   const c = document.createElement('canvas');
   c.width = Math.max(1, Math.round(w0 * k));
   c.height = Math.max(1, Math.round(h0 * k));
@@ -158,10 +160,11 @@ export interface BuiltAsset {
   bytes: number;
 }
 
-export async function buildAsset(source: string, onStage: (s: Stage) => void): Promise<BuiltAsset> {
+/** `maxSide` is 512 normally and 1024 for upscaled (HD) images. */
+export async function buildAsset(source: string, onStage: (s: Stage) => void, maxSide = MAX_SIDE): Promise<BuiltAsset> {
   onStage('Preparing image');
   const img = await loadImage(source);
-  const raw = toCanvas(img);
+  const raw = toCanvas(img, maxSide);
   await yieldUI();
 
   onStage('Removing background');
