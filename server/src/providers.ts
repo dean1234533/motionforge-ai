@@ -42,6 +42,8 @@ export interface ServerProvider {
   id: string;
   /** For bring-your-own-key mode: which stored key providers this adapter can use. Omit to allow any. */
   keyProviders?: string[];
+  /** True when the provider animates one of the project's uploaded images. */
+  needsImage?: boolean;
   step(stage: (typeof STAGES)[number], ctx: StepContext): Promise<Record<string, unknown> | void>;
 }
 
