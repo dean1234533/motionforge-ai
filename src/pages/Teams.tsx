@@ -104,7 +104,7 @@ function TeamPanel({ teamId, onChanged, onGone }: { teamId: string; onChanged: (
   const act = async (fn: () => Promise<unknown>, done: string) => {
     try {
       await fn();
-      setMessage(done);
+      if (done) setMessage(done);
       await load();
       onChanged();
     } catch (e) {
