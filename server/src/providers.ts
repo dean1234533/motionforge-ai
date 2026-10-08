@@ -1,6 +1,8 @@
 import { planFromPrompt } from '../../src/ai/localPlanner';
 
-export const STAGES = [
+export type JobKind = 'motion' | 'image-gen' | 'upscale';
+
+export const MOTION_STAGES = [
   'Analysing prompt',
   'Preparing image',
   'Removing background',
@@ -9,6 +11,14 @@ export const STAGES = [
   'Optimising assets',
   'Building preview',
 ] as const;
+export const STAGES = MOTION_STAGES;
+
+export const stagesFor = (kind: JobKind): readonly string[] =>
+  kind === 'image-gen'
+    ? ['Preparing image', 'Generating image', 'Optimising assets']
+    : kind === 'upscale'
+      ? ['Preparing image', 'Upscaling', 'Optimising assets']
+      : MOTION_STAGES;
 
 export type Mode = 'free' | 'fast' | 'professional' | 'byok';
 
@@ -19,14 +29,23 @@ export const MODES: Record<Mode, { label: string; cost: number }> = {
   byok: { label: 'Bring your own key', cost: 0 },
 };
 
+/** One-off tools. With your own key the platform charges no credits. */
+export const TOOLS: Record<Exclude<JobKind, 'motion'>, { label: string; cost: number }> = {
+  'image-gen': { label: 'Image generation', cost: 4 },
+  upscale: { label: 'Upscale', cost: 6 },
+};
+
 export interface StepContext {
-  input: { prompt: string; keyProvider?: string; assetId?: string };
+  kind: JobKind;
+  input: { prompt: string; keyProvider?: string; assetId?: string; sourceName?: string; scale?: number };
   state: Record<string, unknown>;
-  /** Decrypted user key (bring-your-own-key mode only). Providers must never log or return it. */
+  /** Decrypted user key (when the job uses the user's own key). Providers must never log or return it. */
   apiKey?: string;
   assets: {
     read(assetId: string): Promise<{ bytes: Uint8Array; type: string } | null>;
     putJobFile(name: string, bytes: Uint8Array, type: string): Promise<void>;
+    /** Adds an image to the job's project. `hd` marks upscaled images. */
+    saveAsset(assetId: string, name: string, bytes: Uint8Array, hd?: boolean): Promise<void>;
   };
 }
 
@@ -37,24 +56,32 @@ export class PendingError extends Error {
   }
 }
 
-/** One unit of server-side generation work per stage. Results are merged into the job's saved state. */
+/** One unit of server-side work per stage. Results are merged into the job's saved state. */
 export interface ServerProvider {
   id: string;
-  /** For bring-your-own-key mode: which stored key providers this adapter can use. Omit to allow any. */
+  /** Which stored key providers this adapter can use for "your own key" jobs. Omit to allow any. */
   keyProviders?: string[];
-  /** True when the provider animates one of the project's uploaded images. */
+  /** True when the provider animates or enlarges one of the project's uploaded images. */
   needsImage?: boolean;
-  step(stage: (typeof STAGES)[number], ctx: StepContext): Promise<Record<string, unknown> | void>;
+  /** True when the server owns a key for this provider, so credits can pay for it. */
+  platformKey?: boolean;
+  step(stage: string, ctx: StepContext): Promise<Record<string, unknown> | void>;
 }
 
 /** Free mode: rule-based planning on the server. Image work for this mode runs in the browser. */
 export const localRulesProvider: ServerProvider = {
   id: 'local-rules',
+  platformKey: true,
   async step(stage, ctx) {
     if (stage === 'Analysing prompt') return { plan: planFromPrompt(ctx.input.prompt) };
   },
 };
 
 export type ProviderRegistry = Partial<Record<Mode, ServerProvider>>;
+export type ToolRegistry = Partial<Record<Exclude<JobKind, 'motion'>, ServerProvider>>;
+export interface Registry {
+  modes: ProviderRegistry;
+  tools: ToolRegistry;
+}
 
 export const defaultProviders: ProviderRegistry = { free: localRulesProvider };
