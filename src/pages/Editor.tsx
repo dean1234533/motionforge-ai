@@ -601,7 +601,6 @@ export function Editor({ initialPrompt }: { initialPrompt: string }) {
         </form>
         <p className="muted small-note">
           Using {providers.planner.id} · {providers.backgroundRemover.id} · {providers.motionFrames.id} · estimated cost: 0 credits
-          {mode !== providers.mode ? '' : ''}
         </p>
       </div>
     </div>
