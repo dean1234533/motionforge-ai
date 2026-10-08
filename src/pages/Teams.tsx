@@ -115,14 +115,18 @@ function TeamPanel({ teamId, onChanged, onGone }: { teamId: string; onChanged: (
   const invite = (e: FormEvent) => {
     e.preventDefault();
     void act(async () => {
-      const { token } = await api<{ token: string }>('POST', `/api/teams/${teamId}/invites`, { email, role });
+      const sent = email;
+      const { token, emailed } = await api<{ token: string; emailed: boolean }>('POST', `/api/teams/${teamId}/invites`, { email, role });
       setEmail('');
-      try {
-        await navigator.clipboard.writeText(inviteUrl(token));
-      } catch {
-        /* the link is also listed below */
+      if (!emailed) {
+        try {
+          await navigator.clipboard.writeText(inviteUrl(token));
+        } catch {
+          /* the link is also listed below */
+        }
       }
-    }, 'Invitation link created and copied. Send it to them; it only works for that email address.');
+      setMessage(emailed ? `Invitation emailed to ${sent}. The link is also listed below.` : 'Invitation link created and copied. Send it to them yourself; it only works for that email address.');
+    }, '');
   };
 
   if (!team) return <p className="muted">{message || 'Loading…'}</p>;
@@ -170,7 +174,7 @@ function TeamPanel({ teamId, onChanged, onGone }: { teamId: string; onChanged: (
             </select>
             <button type="submit" className="btn primary" disabled={!email.trim()}>Create invitation link</button>
           </form>
-          <p className="muted small-note">Invitations are links you send yourself; MotionForge does not email them.</p>
+          <p className="muted small-note">If this server has email set up, the invitation is emailed. Otherwise copy the link and send it yourself.</p>
           {team.invites.length > 0 && (
             <ul className="list">
               {team.invites.map((i) => (
