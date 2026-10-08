@@ -14,6 +14,20 @@ test('the editing controls are split into tabs, one group per tab', async ({ pag
   await expect(left.getByRole('tab')).toHaveText(['Media', 'Add', 'Layers']);
   await expect(right.getByRole('tab')).toHaveText(['Layer', 'Look', 'Timing', 'Path', 'Scroll']);
 
+  // every tab is fully visible inside its panel (none is cut off or hidden behind a scroll)
+  for (const [strip, panel] of [[left, 'Assets and layers'], [right, 'Properties']] as const) {
+    const panelBox = (await page.getByRole('complementary', { name: panel }).boundingBox())!;
+    const count = await strip.getByRole('tab').count();
+    for (let i = 0; i < count; i++) {
+      const tab = strip.getByRole('tab').nth(i);
+      const b = (await tab.boundingBox())!;
+      const name = await tab.textContent();
+      expect(b.x, `${name} tab starts inside its panel`).toBeGreaterThanOrEqual(panelBox.x - 1);
+      expect(b.x + b.width, `${name} tab ends inside its panel`).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1);
+      await expect(tab, `${name} tab is visible`).toBeInViewport();
+    }
+  }
+
   // Left: each group lives in its own tab and the others are not shown
   const leftTab = (name: string) => left.getByRole('tab', { name, exact: true });
   await expect(leftTab('Media')).toHaveAttribute('aria-selected', 'true');
