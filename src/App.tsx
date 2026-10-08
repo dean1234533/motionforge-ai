@@ -38,7 +38,9 @@ function RequireAuth({ children }: { children: ReactNode }) {
 
 export function App() {
   const { path, params } = useRoute();
-  useEffect(() => window.scrollTo(0, 0), [path]);
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [path]);
 
   const cloud = path.match(/^\/editor\/([0-9a-f-]{36})$/);
   const share = path.match(/^\/share\/([A-Za-z0-9_-]{16,64})$/);
