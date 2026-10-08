@@ -40,7 +40,11 @@ export interface Env {
   STRIPE_PRICE_PROFESSIONAL?: string;
   /** Platform Replicate token for Fast/Professional modes. */
   REPLICATE_API_TOKEN?: string;
-  /** Replicate model version ids for each mode. */
+  /** Replicate models by name (`owner/name`); the app reads each model to learn its inputs. Easier than version ids. */
+  REPLICATE_FAST_MODEL?: string;
+  REPLICATE_PRO_MODEL?: string;
+  REPLICATE_UPSCALE_MODEL?: string;
+  /** Replicate model version ids for each mode (older way; overrides the model names). */
   REPLICATE_FAST_VERSION?: string;
   REPLICATE_PRO_VERSION?: string;
   /** Invitation emails (Resend). Both are needed; without them owners share invite links by hand. */
