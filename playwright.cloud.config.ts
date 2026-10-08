@@ -9,7 +9,7 @@ export default defineConfig({
   retries: 0,
   use: { baseURL: 'http://localhost:8787', viewport: { width: 1280, height: 800 }, actionTimeout: 20_000, navigationTimeout: 30_000 },
   webServer: {
-    command: `npx wrangler d1 migrations apply motionforge --local --config server/wrangler.jsonc && npx wrangler dev --local --port 8787 --config server/wrangler.jsonc --var KEY_ENCRYPTION_SECRET:${SECRET}`,
+    command: `npx wrangler d1 migrations apply motionforge --local --config server/wrangler.jsonc && npx wrangler dev --local --port 8787 --config server/wrangler.jsonc --var KEY_ENCRYPTION_SECRET:${SECRET} --var ALLOWED_ORIGIN:http://localhost:8787 --var APP_URL:http://localhost:8787`,
     url: 'http://localhost:8787/api/health',
     timeout: 180_000,
     reuseExistingServer: false,
