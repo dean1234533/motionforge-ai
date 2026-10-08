@@ -111,7 +111,7 @@ export function Landing() {
       <section className="hero">
         <h1>Turn any image into an interactive scroll animation.</h1>
         <p>Upload an image, describe how it should move, and export production-ready code for any website.</p>
-        <a className="btn primary big" href="#/editor">Create your first animation</a>
+        <a className="btn primary big" href={user ? '#/new' : '#/editor'}>Create your first animation</a>
       </section>
 
       <BirdDemo />
@@ -184,7 +184,8 @@ export function Landing() {
 
       <section className="hero end">
         <h2>Make something that moves with your visitors.</h2>
-        <a className="btn primary big" href="#/editor">Create your first animation</a>
+        <p className="muted small-note">Version {__BUILD_ID__}</p>
+        <a className="btn primary big" href={user ? '#/new' : '#/editor'}>Create your first animation</a>
       </section>
     </div>
   );
