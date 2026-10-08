@@ -48,13 +48,13 @@ describe('priority processing', () => {
     };
     const freeJob = await mk(free, 'priority-free-01'); // created first, so it is older
     const proJob = await mk(pro, 'priority-pro-001');
-    // stop the immediate runs from racing this test, then age both jobs
-    app.sqlite.prepare("UPDATE jobs SET status = 'queued', updated_at = updated_at - 100").run();
+    // let the immediate runs finish, then put both jobs back in the waiting line, aged
+    await app.settle();
+    app.sqlite.prepare("UPDATE jobs SET status = 'queued', stage_done = -1, state = '{}', updated_at = updated_at - 100").run();
 
     expect(await resumeJobs(app.env.DB, app.env, resolveRegistry(app.env, { fetchFn: fetch }), 1)).toBe(1);
     const status = (id: string) => (app.sqlite.prepare('SELECT status FROM jobs WHERE id = ?').get(id) as { status: string }).status;
     expect(status(proJob)).toBe('complete');
     expect(status(freeJob)).toBe('queued');
-    await app.settle();
   });
 });
