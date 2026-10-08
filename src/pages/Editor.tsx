@@ -13,7 +13,8 @@ import { EFFECT_LABELS, emptyScene, newEffect, newLine, newObject, newShape } fr
 import { EASINGS, EFFECT_TYPES, parseScene } from '../scene/schema';
 import type { EffectSettings, EffectType, Keyframe, LineSettings, Scene, SceneObject, ShapeSettings } from '../scene/schema';
 import { extractFrames } from '../ai/videoFrames';
-import { toUploadBlob } from '../ai/imagePipeline';
+import { chromaScreenBlob, toUploadBlob } from '../ai/imagePipeline';
+import type { KeyColor } from '../ai/chromaKey';
 import { api, uploadBinary, when } from '../lib/api';
 import { useSession } from '../lib/session';
 
@@ -130,6 +131,8 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
   const [serverModes, setServerModes] = useState<ModeInfo[]>([]);
   const [showShare, setShowShare] = useState(false);
   const aborted = useRef(false);
+  /** The temporary chroma-screen copy of an image sent to a video model. */
+  const chroma = useRef<{ id: string; key: KeyColor } | null>(null);
   const modeInfo = serverModes.find((m) => m.mode === mode);
   const [serverTools, setServerTools] = useState<ToolInfo[]>([]);
   const [role, setRole] = useState<'owner' | 'editor' | 'viewer'>('owner');
@@ -188,7 +191,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
           setRole(project.role);
           const { assets: list } = await api<{ assets: { id: string; name: string; hasFrames: boolean; hd: boolean }[] }>('GET', `/api/projects/${projectId}/assets`);
           const restored: Asset[] = [];
-          for (const a of list) {
+          for (const a of list.filter((x) => !x.id.startsWith('gs-'))) {
             const blob = await (await fetch(`/api/projects/${projectId}/assets/${a.id}`, { credentials: 'same-origin' })).blob();
             const source = await readFileAsDataUrl(new File([blob], a.name, { type: blob.type }));
             let frames: string[] | null = null;
@@ -511,7 +514,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     }
     if (videoUrl) {
       setJob({ stage: 'Processing frames' });
-      const frames = await extractFrames(videoUrl);
+      const frames = await extractFrames(videoUrl, 24, 512, chroma.current?.key ?? 'auto');
       setAssets((prev) => prev.map((a) => (a.id === target.assetId ? { ...a, frames } : a)));
       await api('PUT', `/api/projects/${projectId}/assets/${target.assetId}/frames`, frames);
     }
@@ -548,6 +551,10 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
         }
         const me = await api<{ credits: number }>('GET', '/api/me').catch(() => null);
         if (me) session.setCredits(me.credits);
+        if (chroma.current) {
+          api('DELETE', `/api/projects/${projectId}/assets/${chroma.current.id}`).catch(() => undefined);
+          chroma.current = null;
+        }
         return;
       }
       if (job.status === 'cancelled') return setJob(null);
@@ -569,13 +576,22 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     const cost = modeInfo.cost === 0 ? 'no credits (you pay the provider directly)' : `${modeInfo.cost} credits (you have ${session.credits})`;
     if (!window.confirm(`This will use ${cost} with ${modeInfo.provider}. Continue?`)) return;
     try {
+      // Video models cannot make transparent video, so the subject is filmed on a flat colour screen
+      // and that colour is keyed out of every frame afterwards.
+      setJob({ stage: 'Preparing image' });
+      const source = assets.find((a) => a.id === target.assetId)?.source;
+      if (!source) throw new Error('That layer has no image to animate.');
+      const screen = await chromaScreenBlob(source);
+      const screenId = `gs-${target.assetId}`.slice(0, 40);
+      await uploadBinary(`/api/projects/${projectId}/assets/${screenId}?name=chroma-screen.png`, screen.blob);
+      chroma.current = { id: screenId, key: screen.key };
       setJob({ stage: 'Analysing prompt' });
       const created = await api<{ job: ServerJob; credits: number }>('POST', '/api/jobs', {
         projectId,
         mode,
-        prompt: text,
+        prompt: `${text}. The subject stays centred on a flat, bright ${screen.key} background with a static camera.`,
         idempotencyKey: crypto.randomUUID(),
-        assetId: target.assetId,
+        assetId: screenId,
         keyProvider,
       });
       session.setCredits(created.credits);
