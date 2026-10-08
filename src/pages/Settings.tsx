@@ -117,6 +117,7 @@ export function Settings() {
           ))}
         </tbody>
       </table>
+      <p className="muted small-note">App version {__BUILD_ID__}</p>
     </div>
   );
 }
