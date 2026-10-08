@@ -1,0 +1,21 @@
+{
+  // One Worker serves the API and the built front-end (npm run build -> dist/) from the same address.
+  // Cloudflare's "Deploy" step runs `npx wrangler deploy` from the repo root and finds this file.
+  "name": "motionforge-ai",
+  "main": "server/src/index.ts",
+  "compatibility_date": "2025-01-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  // No database_id / extra setup needed: Wrangler creates these on the first deploy,
+  // and the Worker creates its own tables the first time it runs.
+  "d1_databases": [{ "binding": "DB", "database_name": "motionforge" }],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "motionforge-files" }],
+  // Resumes generation jobs that are waiting on an AI provider.
+  "triggers": { "crons": ["* * * * *"] }
+  // Settings are in the Cloudflare dashboard: Workers & Pages > motionforge-ai > Settings > Variables and Secrets.
+  // Required secret:  KEY_ENCRYPTION_SECRET   (openssl rand -base64 32)   - without it, saving API keys is switched off.
+  // Optional:         see DEPLOY.md (Stripe, Replicate, OpenAI, Resend, ALLOWED_ORIGIN, APP_URL).
+}
