@@ -12,6 +12,7 @@ import { providersFromEnv, toolsFromEnv } from './replicate';
 import { createShare, getShared, listShares, revokeShare } from './shares';
 import { acceptInvite, createTeam, deleteTeam, getTeam, inviteMember, listTeams, previewInvite, removeMember, revokeInvite, setMemberRole } from './teams';
 import { projectAccess } from './access';
+import { ensureSchema } from './schema';
 import { sendMail } from './mail';
 import type { Env, UserRow } from './types';
 
@@ -60,8 +61,10 @@ async function readBytes(req: Request, max: number): Promise<Uint8Array> {
 const bin = (bytes: Uint8Array, type: string, cache = 'private, max-age=300') =>
   new Response(bytes as unknown as BodyInit, { headers: { 'content-type': type, 'cache-control': cache, 'content-security-policy': "default-src 'none'" } });
 
-async function route(req: Request, env: Env, deps: Deps, ctx?: Ctx): Promise<Response> {
+async function route(req: Request, rawEnv: Env, deps: Deps, ctx?: Ctx): Promise<Response> {
   const url = new URL(req.url);
+  // Links in Stripe and email default to the address the app is being served from.
+  const env: Env = rawEnv.APP_URL ? rawEnv : { ...rawEnv, APP_URL: url.origin };
   const path = url.pathname;
   const method = req.method;
   const db = env.DB;
@@ -70,6 +73,7 @@ async function route(req: Request, env: Env, deps: Deps, ctx?: Ctx): Promise<Res
 
   if (!path.startsWith('/api/')) throw new HttpError(404, 'Not found.');
   if (path === '/api/health') return json({ ok: true });
+  await ensureSchema(env.DB);
 
   // Stripe calls this itself, so it cannot send our CSRF header. The signature is the authentication.
   if (path === '/api/webhooks/stripe' && method === 'POST') {
