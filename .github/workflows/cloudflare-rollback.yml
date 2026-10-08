@@ -1,0 +1,20 @@
+name: Cloudflare rollback
+# Puts an earlier saved version of the Worker back live (exactly as it was: code, files and settings).
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version id to restore (see the "Cloudflare history" workflow)
+        required: true
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npx wrangler@4 rollback "${{ inputs.version }}" --name motionforge-ai --message "Restore the version that was live before the GitHub deploy" -y
+      - run: npx wrangler@4 deployments list --name motionforge-ai | tail -12
