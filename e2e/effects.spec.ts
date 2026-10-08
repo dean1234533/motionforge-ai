@@ -92,10 +92,11 @@ test('add fire to the bird, export it, and the exported page draws and reverses 
   await expect(page.getByText('Added fire.', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: 'Fire', exact: true }).click();
   await expect(page.getByLabel('Follow another layer')).not.toHaveValue('');
-  await page.getByLabel('Particles').fill('300');
+  const range = (label: RegExp) => page.locator('label.field').filter({ hasText: label }).locator('input[type=range]').first();
+  await range(/^Particles\d/).fill('300');
 
   // add parallax scenery through the properties panel as well
-  await page.getByLabel('Parallax (depth drift)').fill('1');
+  await range(/^Parallax/).fill('1');
 
   await page.getByRole('button', { name: 'Export' }).click();
   const [download] = await Promise.all([page.waitForEvent('download', { timeout: 20_000 }), page.getByRole('button', { name: 'Download standalone HTML' }).click()]);
