@@ -26,7 +26,7 @@ test('teams: owner invites a viewer, the viewer gets a read-only team project', 
   await expect(owner.getByRole('alert')).toContainText('Professional plan');
 
   // upgrade the plan directly in the local database (real billing is covered by unit tests)
-  execSync(`npx wrangler d1 execute motionforge --local --config server/wrangler.jsonc --command "UPDATE users SET plan='professional' WHERE email='${ownerEmail}'"`, { stdio: 'pipe' });
+  execSync(`npx wrangler d1 execute motionforge --local --command "UPDATE users SET plan='professional' WHERE email='${ownerEmail}'"`, { stdio: 'pipe' });
   await owner.reload();
   await owner.getByLabel('Team name').fill('Studio');
   await owner.getByRole('button', { name: 'Create team' }).click();
