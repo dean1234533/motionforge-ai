@@ -1,3 +1,5 @@
+import { KEY_HEX, pickKeyColor } from './chromaKey';
+import type { KeyColor } from './chromaKey';
 import type { BackgroundRemover, MotionFrameGenerator } from './providers';
 
 export type Stage =
@@ -190,6 +192,41 @@ export async function buildAsset(source: string, onStage: (s: Stage) => void, ma
 export function encodeCanvas(c: HTMLCanvasElement): string {
   const webp = c.toDataURL('image/webp', 0.88);
   return webp.startsWith('data:image/webp') ? webp : c.toDataURL('image/png');
+}
+
+/**
+ * The subject on a flat key-colour screen, for image-to-video models that cannot make transparent video.
+ * The colour is chosen so the subject does not use it.
+ */
+export async function chromaScreenBlob(source: string, maxSide = 768): Promise<{ blob: Blob; key: KeyColor }> {
+  const img = await loadImage(source);
+  const removed = await localBackgroundRemover.remove(toCanvas(img, maxSide));
+  const base = trim(removed.canvas);
+  const { data } = base.getContext('2d')!.getImageData(0, 0, base.width, base.height);
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let n = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] > 128) {
+      r += data[i];
+      g += data[i + 1];
+      b += data[i + 2];
+      n++;
+    }
+  }
+  const key = n ? pickKeyColor(r / n, g / n, b / n) : 'green';
+  const pad = Math.round(Math.max(base.width, base.height) * 0.2);
+  const c = document.createElement('canvas');
+  c.width = base.width + pad * 2;
+  c.height = base.height + pad * 2;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = KEY_HEX[key];
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(base, pad, pad);
+  const blob = await new Promise<Blob | null>((res) => c.toBlob(res, 'image/png'));
+  if (!blob) throw new Error('Could not prepare the image for video generation.');
+  return { blob, key };
 }
 
 /** A PNG (keeps transparency) no larger than 1600 px, small enough to upload to the server. */
