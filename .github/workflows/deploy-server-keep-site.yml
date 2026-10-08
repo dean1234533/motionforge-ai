@@ -1,0 +1,38 @@
+name: Deploy server, keep the live site
+# Updates only the back-end code. The website pages are downloaded from the live address first and uploaded unchanged,
+# so how the site looks cannot change. Run it by hand from the Actions tab.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Live address whose pages to keep
+        default: https://motionforge-ai.deanatthrive.workers.dev
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download the live pages exactly as they are
+        env:
+          URL: ${{ inputs.url }}
+        run: |
+          set -e
+          rm -rf dist && mkdir -p dist/assets
+          curl -sfS "$URL/" -o dist/index.html
+          for f in $(grep -oE '(src|href)="\./assets/[^"]+"' dist/index.html | sed -E 's/^(src|href)="\.\///; s/"$//'); do
+            echo "keeping $f"; curl -sfS "$URL/$f" -o "dist/$f"
+          done
+          curl -sfS "$URL/sample-bird.svg" -o dist/sample-bird.svg
+          ls -la dist dist/assets
+          grep -c . dist/index.html
+      - run: npm install
+      - name: Deploy (back end only)
+        run: |
+          git log -1 --format='Back end from commit %h: %s'
+          npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
