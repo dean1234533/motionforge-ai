@@ -25,13 +25,19 @@ function BirdDemo() {
         });
         const built = await buildAsset(data, () => undefined);
         const plan = planFromPrompt(DEMO_PROMPT);
+        // Start and end inside the frame (not off-screen) so the bird is visible from the first moment.
+        const inView = (plan.patch.path ?? []).map((k) => ({
+          ...k,
+          x: Math.round((12 + ((k.x + 15) / 130) * 76) * 10) / 10,
+          y: Math.round((16 + ((k.y + 10) / 120) * 66) * 10) / 10,
+        }));
         const parsed = parseScene({
           ...emptyScene(),
-          objects: [{ ...newObject('bird', 'bird', 'Bird'), ...plan.patch, widthPct: 24 }],
+          objects: [{ ...newObject('bird', 'bird', 'Bird'), ...plan.patch, path: inView, widthPct: 24 }],
           scroll: { ...emptyScene().scroll, length: 1400 },
         });
         if (cancelled || !host.current || !parsed.ok) return;
-        controller = window.MotionForge.mount(host.current, { scene: parsed.scene, assets: { bird: built.frames } }, { stageHeight: '80vh' });
+        controller = window.MotionForge.mount(host.current, { scene: parsed.scene, assets: { bird: built.frames } }, { stageHeight: '70vh' });
         setState('ready');
       } catch {
         if (!cancelled) setState('error');
@@ -109,7 +115,8 @@ export function Landing() {
       </header>
 
       <section className="hero">
-        <h1>Turn any image into an interactive scroll animation.</h1>
+        <p className="eyebrow">Scroll animation maker</p>
+        <h1>Turn any image into an <span className="grad">interactive scroll animation.</span></h1>
         <p>Upload an image, describe how it should move, and export production-ready code for any website.</p>
         <a className="btn primary big" href={user ? '#/new' : '#/editor'}>Create your first animation</a>
       </section>
@@ -127,7 +134,7 @@ export function Landing() {
 
       <section className="section" aria-labelledby="gallery">
         <h2 id="gallery">Try an idea</h2>
-        <ul className="cards">
+        <ul className="cards cards-3">
           {GALLERY.map(([title, prompt, art]) => (
             <li key={title}>
               <Art kind={art} />
