@@ -36,9 +36,17 @@ A cron trigger (every minute) resumes jobs that are waiting on Replicate.
 
 Costs in credits are in `server/src/providers.ts` (`TOOLS`, `MODES`).
 
+## Optional: invitation emails
+
+Set the secret `RESEND_API_KEY` (from resend.com) and the variable `MAIL_FROM`, for example `MotionForge <team@yourdomain.com>` (the domain must be verified in Resend). `APP_URL` must also be set. Without these, owners copy the invitation link and send it themselves.
+
 ## Teams
 
-Creating a team needs the Professional plan (set by a successful Stripe checkout). Invitations are links the owner sends; the server does not send email.
+Creating a team needs the Professional plan (set by a successful Stripe checkout). Invitation links are tied to one email address and expire after 7 days.
+
+## Plans
+
+Project limits and the feature lists shown on the Billing page are in `server/src/plans.ts`; credits per plan are in `server/src/billing.ts`. Exports made on a Free plan (or with no account) carry a small badge that links back to the editor; the licence text for exports is in `src/export/build.ts`. Review that wording before you launch.
 
 ## Local development
 
