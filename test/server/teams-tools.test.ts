@@ -144,6 +144,51 @@ describe('teams', () => {
   });
 });
 
+describe('invitation emails (mocked HTTP)', () => {
+  const mailEnv = { RESEND_API_KEY: 're_test', MAIL_FROM: 'MotionForge <team@example.com>', APP_URL: 'https://app.example.com' };
+
+  async function ownerWithTeam(fetchFn: typeof fetch, env: Record<string, string>) {
+    const app = makeApp({ fetchFn }, env);
+    const { owner, teamId } = await teamWith(app);
+    return { app, owner, teamId };
+  }
+
+  it('emails the invitation with a link only the invited address can use', async () => {
+    const sent: { url: string; auth: string; body: { from: string; to: string[]; subject: string; text: string } }[] = [];
+    const fetchFn = (async (url: string, init: RequestInit) => {
+      sent.push({ url, auth: (init.headers as Record<string, string>).authorization, body: JSON.parse(String(init.body)) });
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    const { app, owner, teamId } = await ownerWithTeam(fetchFn, mailEnv);
+    const r = await app.call('POST', `/api/teams/${teamId}/invites`, { email: 'New.Person@Example.com', role: 'editor' }, owner.cookie);
+    expect(r.body.emailed).toBe(true);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe('https://api.resend.com/emails');
+    expect(sent[0].auth).toBe('Bearer re_test');
+    expect(sent[0].body.to).toEqual(['new.person@example.com']);
+    expect(sent[0].body.from).toBe('MotionForge <team@example.com>');
+    expect(sent[0].body.text).toContain(`https://app.example.com/#/invite/${r.body.token}`);
+    expect(sent[0].body.text).toContain('an editor');
+    expect(sent[0].body.subject).toContain('Studio');
+  });
+
+  it('still creates the invitation when mail fails or is not configured', async () => {
+    const broken = (async () => new Response('no', { status: 500 })) as unknown as typeof fetch;
+    const a = await ownerWithTeam(broken, mailEnv);
+    const failed = await a.app.call('POST', `/api/teams/${a.teamId}/invites`, { email: 'x@example.com', role: 'viewer' }, a.owner.cookie);
+    expect(failed.status).toBe(201);
+    expect(failed.body.emailed).toBe(false);
+    expect(failed.body.token).toBeTruthy();
+
+    let calls = 0;
+    const counting = (async () => { calls++; return new Response('{}'); }) as unknown as typeof fetch;
+    const b = await ownerWithTeam(counting, {});
+    const plain = await b.app.call('POST', `/api/teams/${b.teamId}/invites`, { email: 'y@example.com', role: 'viewer' }, b.owner.cookie);
+    expect(plain.body.emailed).toBe(false);
+    expect(calls).toBe(0);
+  });
+});
+
 describe('image generation and upscaling (mocked HTTP; not verified against the live services)', () => {
   function mockFetch() {
     const calls: { url: string; method: string; auth?: string; body?: any }[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
