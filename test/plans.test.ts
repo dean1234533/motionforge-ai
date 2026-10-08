@@ -1,0 +1,60 @@
+import { describe, expect, it } from 'vitest';
+import { resumeJobs } from '../server/src/jobs';
+import { resolveRegistry } from '../server/src/router';
+import { makeApp } from './server/harness';
+
+describe('plan limits', () => {
+  it('limits how many projects each plan can create', async () => {
+    const app = makeApp();
+    const u = await app.user();
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const r = await app.call('POST', '/api/projects', { name: `P${i}` }, u.cookie);
+      expect(r.status).toBe(201);
+      ids.push(r.body.project.id);
+    }
+    const blocked = await app.call('POST', '/api/projects', { name: 'P3' }, u.cookie);
+    expect(blocked.status).toBe(402);
+    expect(blocked.body.error).toContain('up to 3 projects');
+
+    // deleting frees a slot, upgrading raises the limit
+    await app.call('DELETE', `/api/projects/${ids[0]}`, undefined, u.cookie);
+    expect((await app.call('POST', '/api/projects', { name: 'again' }, u.cookie)).status).toBe(201);
+    expect((await app.call('POST', '/api/projects', { name: 'one more' }, u.cookie)).status).toBe(402);
+    app.sqlite.prepare("UPDATE users SET plan = 'creator' WHERE id = ?").run(u.id);
+    expect((await app.call('POST', '/api/projects', { name: 'one more' }, u.cookie)).status).toBe(201);
+  });
+
+  it('describes each plan on the billing page', async () => {
+    const app = makeApp();
+    const u = await app.user();
+    const { plans } = (await app.call('GET', '/api/billing', undefined, u.cookie)).body;
+    expect(plans.map((p: { id: string }) => p.id)).toEqual(['free', 'creator', 'professional']);
+    expect(plans[0]).toMatchObject({ projects: 3 });
+    expect(plans[2].features).toEqual(expect.arrayContaining(['Commercial use', 'Team projects', 'Priority processing', 'Advanced export options']));
+    expect(plans[1].features).toContain('No badge on exports');
+  });
+});
+
+describe('priority processing', () => {
+  it('resumes Professional-plan jobs before older free-plan jobs', async () => {
+    const app = makeApp();
+    const free = await app.user();
+    const pro = await app.user();
+    app.sqlite.prepare("UPDATE users SET plan = 'professional' WHERE id = ?").run(pro.id);
+    const mk = async (u: { cookie: string }, key: string) => {
+      const pid = (await app.call('POST', '/api/projects', { name: 'P' }, u.cookie)).body.project.id;
+      return (await app.call('POST', '/api/jobs', { projectId: pid, mode: 'free', prompt: 'fly', idempotencyKey: key }, u.cookie)).body.job.id as string;
+    };
+    const freeJob = await mk(free, 'priority-free-01'); // created first, so it is older
+    const proJob = await mk(pro, 'priority-pro-001');
+    // stop the immediate runs from racing this test, then age both jobs
+    app.sqlite.prepare("UPDATE jobs SET status = 'queued', updated_at = updated_at - 100").run();
+
+    expect(await resumeJobs(app.env.DB, app.env, resolveRegistry(app.env, { fetchFn: fetch }), 1)).toBe(1);
+    const status = (id: string) => (app.sqlite.prepare('SELECT status FROM jobs WHERE id = ?').get(id) as { status: string }).status;
+    expect(status(proJob)).toBe('complete');
+    expect(status(freeJob)).toBe('queued');
+    await app.settle();
+  });
+});
