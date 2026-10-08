@@ -26,7 +26,7 @@ const LlmIntent = z.object({
   scaleStart: num(0.3, 2),
   scaleMiddle: num(0.3, 2),
   scaleEnd: num(0.3, 2),
-  spin: num(-720, 720),
+  spin: num(-360, 360),
   opacityStart: num(0, 1),
   opacityEnd: num(0, 1),
 });
