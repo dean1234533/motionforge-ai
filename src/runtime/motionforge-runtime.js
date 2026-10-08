@@ -297,7 +297,8 @@
     track.style.cssText = 'position:relative;width:100%;';
     var stage = document.createElement('div');
     stage.className = 'mf-stage';
-    stage.style.cssText = 'position:sticky;top:0;width:100%;height:' + stageHeight + ';overflow:hidden;pointer-events:none;';
+    // 100dvh follows the visible area on phones, where the address bar comes and goes; 100vh is the fallback.
+    stage.style.cssText = 'position:sticky;top:0;width:100%;height:' + stageHeight + ';' + (stageHeight === '100vh' ? 'height:100dvh;' : '') + 'overflow:hidden;pointer-events:none;';
     var canvas = document.createElement('canvas');
     canvas.setAttribute('role', 'img');
     canvas.setAttribute('aria-label', 'Scroll-controlled animation');
