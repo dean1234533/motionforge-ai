@@ -18,7 +18,8 @@ describe('export', () => {
     expect(html).toContain('MotionForge.mount');
     expect(html).toContain('prefers-reduced-motion');
     expect(html).not.toMatch(/api[_-]?key|authorization|bearer/i);
-    expect(html).not.toMatch(/https?:\/\//);
+    // the only URL allowed is the SVG XML namespace, which is an identifier and is never fetched
+    expect(html.replace('http://www.w3.org/2000/svg', '')).not.toMatch(/https?:\/\//);
   });
 
   it('cannot be broken out of by user text in the scene', () => {
