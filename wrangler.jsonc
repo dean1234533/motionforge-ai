@@ -9,10 +9,11 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
-  // No database_id / extra setup needed: Wrangler creates these on the first deploy,
-  // and the Worker creates its own tables the first time it runs.
+  // No IDs or setup needed: Wrangler creates the database and the image bucket on the first deploy
+  // (for R2 that only works when no bucket_name is given), and the Worker creates its own tables
+  // the first time it runs.
   "d1_databases": [{ "binding": "DB", "database_name": "motionforge" }],
-  "r2_buckets": [{ "binding": "FILES", "bucket_name": "motionforge-files" }],
+  "r2_buckets": [{ "binding": "FILES" }],
   // Resumes generation jobs that are waiting on an AI provider.
   "triggers": { "crons": ["* * * * *"] }
   // Settings are in the Cloudflare dashboard: Workers & Pages > motionforge-ai > Settings > Variables and Secrets.
