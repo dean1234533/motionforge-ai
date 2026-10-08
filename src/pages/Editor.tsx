@@ -137,6 +137,8 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
   const chroma = useRef<{ id: string; key: KeyColor } | null>(null);
   const modeInfo = serverModes.find((m) => m.mode === mode);
   const [serverTools, setServerTools] = useState<ToolInfo[]>([]);
+  /** Which server settings exist (yes/no only), so a missing one can be named. */
+  const [setup, setSetup] = useState<Record<string, boolean> | null>(null);
   const [role, setRole] = useState<'owner' | 'editor' | 'viewer'>('owner');
   const [aiPrompt, setAiPrompt] = useState('');
   const [payWithKey, setPayWithKey] = useState(false);
@@ -153,8 +155,9 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
 
   useEffect(() => {
     if (!projectId) return;
-    api<{ modes: ModeInfo[]; tools: ToolInfo[]; balance: number }>('GET', '/api/modes')
+    api<{ modes: ModeInfo[]; tools: ToolInfo[]; balance: number; setup?: Record<string, boolean> }>('GET', '/api/modes')
       .then((r) => {
+        setSetup(r.setup ?? null);
         setServerModes(r.modes);
         setServerTools(r.tools);
         session.setCredits(r.balance);
@@ -770,8 +773,11 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     }
     if (serverModes.length === 0) return 'Could not check what this server supports. Refresh the page and try again.';
     if (serverModes.find((s) => s.mode === m)?.available) return null;
+    if ((m === 'fast' || m === 'professional') && setup && !setup.replicateToken) {
+      return `${m === 'fast' ? 'Fast' : 'Professional'} is not set up yet: the server cannot see REPLICATE_API_TOKEN. In Cloudflare it must be a Secret in the Worker's own Settings → Variables and Secrets (not the Build settings), followed by a redeploy. See Settings in this app for a setup checklist.`;
+    }
     if (m === 'fast') return 'Fast is not set up on this server yet. The person who runs it needs to add REPLICATE_API_TOKEN.';
-    if (m === 'professional') return 'Professional is not set up yet. The person who runs it needs to choose a video model (REPLICATE_PRO_MODEL).';
+    if (m === 'professional') return 'Professional is not set up yet: the server has a Replicate token but no video model chosen. Add a variable REPLICATE_PRO_MODEL, for example bytedance/seedance-1-pro.';
     return 'This mode is not available on this server.';
   }
 
