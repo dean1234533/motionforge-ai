@@ -13,13 +13,15 @@ export interface MFPose {
   blur: number;
   phase: number;
   cycle: number;
+  /** Eased progress through this object's own start/end range (0-1). */
+  t: number;
 }
 
 export interface MFController {
   update(scene: unknown): void;
   getProgress(): number;
   /** Which renderer is drawing particle effects. */
-  info(): { effects: 'webgl' | 'canvas2d' };
+  info(): { effects: 'webgl' | 'canvas2d'; shapes: 'html' | null; lines: 'svg' | null };
   destroy(): void;
 }
 
