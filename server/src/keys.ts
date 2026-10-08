@@ -14,7 +14,12 @@ export function assertProvider(p: string): void {
   if (!Object.hasOwn(KEY_PROVIDERS, p)) throw new HttpError(400, `Unsupported provider. Choose one of: ${Object.keys(KEY_PROVIDERS).join(', ')}.`);
 }
 
+function requireSecret(secret: string | undefined): asserts secret is string {
+  if (!secret) throw new HttpError(501, 'Saving API keys is not set up on this server yet. The host needs to set KEY_ENCRYPTION_SECRET.');
+}
+
 export async function saveKey(db: D1Database, secret: string, userId: string, provider: string, apiKey: unknown): Promise<void> {
+  requireSecret(secret);
   assertProvider(provider);
   if (typeof apiKey !== 'string' || apiKey.length < 8 || apiKey.length > 400 || /\s/.test(apiKey)) {
     throw new HttpError(400, 'That does not look like an API key.');
@@ -46,6 +51,7 @@ export async function removeKey(db: D1Database, userId: string, provider: string
 
 /** Server-internal only. The result must never be returned to a client or logged. */
 export async function readKey(db: D1Database, secret: string, userId: string, provider: string): Promise<string | null> {
+  requireSecret(secret);
   const row = await db
     .prepare('SELECT ciphertext, iv FROM provider_keys WHERE user_id = ? AND provider = ?')
     .bind(userId, provider)
