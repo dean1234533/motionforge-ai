@@ -57,8 +57,17 @@ test('account -> project -> upload -> autosave -> reload -> share -> settings ->
   // wait for the server to confirm the save of the planned path (not just for the "Saved" label)
   await page.waitForResponse((r) => r.request().method() === 'PUT' && /\/api\/projects\/[0-9a-f-]{36}$/.test(r.url()) && r.request().postData()?.includes('"progress":0.25') === true, { timeout: 15_000 });
 
-  // paid modes are honestly unavailable on a server with no providers configured
-  await expect(page.locator('select[aria-label="Generation mode"] option[value="fast"]')).toHaveAttribute('disabled', '');
+  // every mode can be chosen; ones this server has not set up explain why instead of being greyed out
+  const mode = page.locator('select[aria-label="Generation mode"]');
+  await mode.selectOption('fast');
+  await expect(page.getByText('Fast is not set up on this server yet.')).toBeVisible();
+  await page.locator('#prompt').fill('make it fly');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page.getByText('Fast is not set up on this server yet.').first()).toBeVisible();
+  await mode.selectOption('byok'); // bring-your-own-key needs no server setup
+  await expect(page.getByText('not available on this server')).toHaveCount(0);
+  await mode.selectOption('free');
+  await page.locator('#prompt').fill('');
 
   // reload: everything comes back from the server
   await page.reload();
