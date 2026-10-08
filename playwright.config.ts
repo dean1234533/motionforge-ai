@@ -1,4 +1,4 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: 'e2e',
@@ -6,5 +6,9 @@ export default defineConfig({
   retries: 0,
   use: { actionTimeout: 20_000, navigationTimeout: 30_000, baseURL: 'http://localhost:4173', viewport: { width: 1280, height: 800 } },
   webServer: { command: 'npm run preview -- --port 4173', url: 'http://localhost:4173', reuseExistingServer: false },
-  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
+  projects: [
+    { name: 'chromium', use: { browserName: 'chromium' }, testIgnore: /mobile\.spec/ },
+    // A real phone: touch input, a small screen and a mobile user agent.
+    { name: 'mobile', use: { ...devices['Pixel 5'] }, testMatch: /mobile\.spec/ },
+  ],
 });
