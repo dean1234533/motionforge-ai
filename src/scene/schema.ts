@@ -33,13 +33,43 @@ export const EffectSchema = z.object({
   layer: z.enum(['back', 'front']).default('front'),
 });
 
+const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+const layer = z.enum(['back', 'front']);
+
+/** A simple coloured shape. Drawn as an HTML/CSS element. */
+export const ShapeSchema = z.object({
+  type: z.enum(['circle', 'rect']).default('circle'),
+  color: hex.default('#8ab4ff'),
+  /** Size as % of the stage width and height. */
+  widthPct: num(1, 100).default(10),
+  heightPct: num(1, 100).default(10),
+  /** Corner rounding for rectangles, as % of the shorter side. */
+  radius: num(0, 50).default(12),
+  layer: layer.default('front'),
+});
+
+/** A vector line along a path. Drawn as SVG, and it draws itself in as you scroll. */
+export const LineSchema = z.object({
+  color: hex.default('#ffffff'),
+  /** Stroke width in px. */
+  width: num(1, 40).default(4),
+  cap: z.enum(['round', 'butt']).default('round'),
+  /** 'draw' reveals the line with the scroll; 'static' shows all of it. */
+  reveal: z.enum(['draw', 'static']).default('draw'),
+  /** Dash length in px for a dashed static line (0 = solid). */
+  dash: num(0, 50).default(0),
+  layer: layer.default('front'),
+});
+
 export const SceneObjectSchema = z
   .object({
     id,
     name: z.string().trim().min(1).max(60),
-    kind: z.enum(['image', 'effect']).default('image'),
+    kind: z.enum(['image', 'effect', 'shape', 'line']).default('image'),
     assetId: id.default('none'),
     effect: EffectSchema.optional(),
+    shape: ShapeSchema.optional(),
+    line: LineSchema.optional(),
     widthPct: num(2, 100).default(22),
     flapsPerScroll: num(0, 80).default(0),
     path: z.array(KeyframeSchema).min(2).max(24),
@@ -63,7 +93,9 @@ export const SceneObjectSchema = z
     offsetY: num(-100, 100).default(0),
   })
   .refine((o) => o.end > o.start, { message: 'end must be after start', path: ['end'] })
-  .refine((o) => o.kind !== 'effect' || o.effect !== undefined, { message: 'an effect needs its settings', path: ['effect'] });
+  .refine((o) => o.kind !== 'effect' || o.effect !== undefined, { message: 'an effect needs its settings', path: ['effect'] })
+  .refine((o) => o.kind !== 'shape' || o.shape !== undefined, { message: 'a shape needs its settings', path: ['shape'] })
+  .refine((o) => o.kind !== 'line' || o.line !== undefined, { message: 'a line needs its settings', path: ['line'] });
 
 export const SceneSchema = z
   .object({
@@ -104,6 +136,8 @@ export type Scene = z.infer<typeof SceneSchema>;
 export type SceneObject = z.infer<typeof SceneObjectSchema>;
 export type Keyframe = z.infer<typeof KeyframeSchema>;
 export type EffectSettings = z.infer<typeof EffectSchema>;
+export type ShapeSettings = z.infer<typeof ShapeSchema>;
+export type LineSettings = z.infer<typeof LineSchema>;
 
 export type ParseResult = { ok: true; scene: Scene } | { ok: false; error: string };
 
