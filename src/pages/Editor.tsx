@@ -8,9 +8,9 @@ import { PathOverlay } from '../editor/PathOverlay';
 import { useHistory } from '../editor/useHistory';
 import { buildPreviewHtml, buildSnippet, buildStandaloneHtml, buildZip } from '../export/build';
 import { sanitizeFilename, sanitizeText, slug, validateUpload } from '../lib/sanitize';
-import { EFFECT_LABELS, emptyScene, newEffect, newObject } from '../scene/defaults';
+import { EFFECT_LABELS, emptyScene, newEffect, newLine, newObject, newShape } from '../scene/defaults';
 import { EASINGS, EFFECT_TYPES, parseScene } from '../scene/schema';
-import type { EffectSettings, EffectType, Keyframe, Scene, SceneObject } from '../scene/schema';
+import type { EffectSettings, EffectType, Keyframe, LineSettings, Scene, SceneObject, ShapeSettings } from '../scene/schema';
 import { extractFrames } from '../ai/videoFrames';
 import { toUploadBlob } from '../ai/imagePipeline';
 import { api, uploadBinary, when } from '../lib/api';
@@ -132,6 +132,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
   const [aiPrompt, setAiPrompt] = useState('');
   const [payWithKey, setPayWithKey] = useState(false);
   const [fxType, setFxType] = useState<EffectType>('smoke');
+  const [shapeType, setShapeType] = useState<ShapeSettings['type']>('circle');
   const readOnly = role === 'viewer';
 
   useEffect(() => {
@@ -593,6 +594,21 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     say('ai', `Added ${EFFECT_LABELS[type].toLowerCase()}.${follows ? ' It follows the selected layer.' : ''}`);
   };
 
+  const addShape = () => {
+    if (scene.objects.length >= 20) return setNotice('A scene can have up to 20 layers.');
+    const s = newShape(`shape-${Math.random().toString(36).slice(2, 6)}`, shapeType);
+    commit({ ...scene, objects: [...scene.objects, s] });
+    setSelectedId(s.id);
+  };
+
+  const addLine = () => {
+    if (scene.objects.length >= 20) return setNotice('A scene can have up to 20 layers.');
+    const l = newLine(`line-${Math.random().toString(36).slice(2, 6)}`, sel && sel.kind !== 'line' ? sel.id : null);
+    commit({ ...scene, objects: [...scene.objects, l] });
+    setSelectedId(l.id);
+    say('ai', l.attachTo ? 'Added a line that draws the selected layer\'s path as you scroll.' : 'Added a line. Drag its handles to shape it.');
+  };
+
   const addGenerated = async (assetId: string, kind: 'image-gen' | 'upscale', opts: { assetId?: string; behind?: boolean }) => {
     const hd = kind === 'upscale';
     const blob = await (await fetch(`/api/projects/${projectId}/assets/${assetId}`, { credentials: 'same-origin' })).blob();
@@ -784,6 +800,18 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
           </div>
           <p className="muted small-note">Smoke, fire, water and sparkles follow the selected layer. Snow falls across the whole scene.</p>
 
+          <h2>Shapes and lines</h2>
+          <div className="row">
+            <label className="sr-only" htmlFor="shape-type">Shape</label>
+            <select id="shape-type" value={shapeType} onChange={(e) => setShapeType(e.target.value as ShapeSettings['type'])}>
+              <option value="circle">Circle</option>
+              <option value="rect">Rectangle</option>
+            </select>
+            <button type="button" className="btn small" onClick={addShape}>Add shape</button>
+            <button type="button" className="btn small" onClick={addLine}>{sel && sel.kind !== 'line' ? 'Trace path' : 'Add line'}</button>
+          </div>
+          <p className="muted small-note">Shapes are simple HTML elements. “Trace path” draws the selected layer's route as a line that fills in as you scroll.</p>
+
           {projectId && (
             <>
               <h2>Create with AI</h2>
@@ -865,9 +893,11 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
                 <input type="text" maxLength={60} value={sel.name} onChange={(e) => patchSel({ name: e.target.value || 'Layer' }, 'name')} />
               </label>
               {sel.effect && <EffectControls effect={sel.effect} onChange={(p) => patchSel({ effect: { ...sel.effect!, ...p } }, `fx-${Object.keys(p)[0]}`)} />}
-              {!sel.effect && <Slider label="Size (% of width)" min={2} max={100} step={1} value={sel.widthPct} onChange={(v) => patchSel({ widthPct: v })} />}
+              {sel.shape && <ShapeControls shape={sel.shape} onChange={(p) => patchSel({ shape: { ...sel.shape!, ...p } }, `shape-${Object.keys(p)[0]}`)} />}
+              {sel.line && <LineControls line={sel.line} onChange={(p) => patchSel({ line: { ...sel.line!, ...p } }, `line-${Object.keys(p)[0]}`)} />}
+              {sel.kind === 'image' && <Slider label="Size (% of width)" min={2} max={100} step={1} value={sel.widthPct} onChange={(v) => patchSel({ widthPct: v })} />}
               <Slider label="Mobile size multiplier" min={0.2} max={2} step={0.05} value={sel.mobileScale} onChange={(v) => patchSel({ mobileScale: v })} />
-              {!sel.effect && <Slider label="Wing flaps per scroll" min={0} max={60} step={1} value={sel.flapsPerScroll} onChange={(v) => patchSel({ flapsPerScroll: v })} />}
+              {sel.kind === 'image' && <Slider label="Wing flaps per scroll" min={0} max={60} step={1} value={sel.flapsPerScroll} onChange={(v) => patchSel({ flapsPerScroll: v })} />}
               <Slider label="Body rise & fall" min={0} max={10} step={0.1} value={sel.bob} onChange={(v) => patchSel({ bob: v })} />
               <Triple label="Rotation (°)" min={-180} max={180} step={1} values={three(sel.rotation)} onChange={(v) => patchSel({ rotation: v }, 'rotation')} />
               <Triple label="Scale" min={0.1} max={3} step={0.05} values={three(sel.scale)} onChange={(v) => patchSel({ scale: v }, 'scale')} />
@@ -995,6 +1025,51 @@ function EffectControls({ effect, onChange }: { effect: EffectSettings; onChange
         </select>
       </label>
       <button type="button" className="btn small ghost" onClick={() => onChange({ seed: Math.floor(Math.random() * 100000) })}>Shuffle pattern</button>
+    </fieldset>
+  );
+}
+
+function ShapeControls({ shape, onChange }: { shape: ShapeSettings; onChange: (patch: Partial<ShapeSettings>) => void }) {
+  return (
+    <fieldset className="triple">
+      <legend>Shape settings</legend>
+      <label className="field"><span>Colour</span>
+        <input type="color" value={shape.color} onChange={(e) => onChange({ color: e.target.value })} aria-label="Shape colour" />
+      </label>
+      <Slider label="Width (% of stage)" min={1} max={100} step={1} value={shape.widthPct} onChange={(v) => onChange({ widthPct: v })} />
+      <Slider label="Height (% of stage)" min={1} max={100} step={1} value={shape.heightPct} onChange={(v) => onChange({ heightPct: v })} />
+      {shape.type === 'rect' && <Slider label="Corner rounding" min={0} max={50} step={1} value={shape.radius} onChange={(v) => onChange({ radius: v })} />}
+      <label className="field"><span>Drawn</span>
+        <select value={shape.layer} onChange={(e) => onChange({ layer: e.target.value as 'back' | 'front' })}>
+          <option value="front">In front of images</option>
+          <option value="back">Behind images</option>
+        </select>
+      </label>
+    </fieldset>
+  );
+}
+
+function LineControls({ line, onChange }: { line: LineSettings; onChange: (patch: Partial<LineSettings>) => void }) {
+  return (
+    <fieldset className="triple">
+      <legend>Line settings</legend>
+      <label className="field"><span>Colour</span>
+        <input type="color" value={line.color} onChange={(e) => onChange({ color: e.target.value })} aria-label="Line colour" />
+      </label>
+      <Slider label="Thickness (px)" min={1} max={40} step={1} value={line.width} onChange={(v) => onChange({ width: v })} />
+      <label className="field"><span>Reveal</span>
+        <select value={line.reveal} onChange={(e) => onChange({ reveal: e.target.value as 'draw' | 'static' })}>
+          <option value="draw">Draws in as you scroll</option>
+          <option value="static">Always fully drawn</option>
+        </select>
+      </label>
+      {line.reveal === 'static' && <Slider label="Dash length (px, 0 = solid)" min={0} max={50} step={1} value={line.dash} onChange={(v) => onChange({ dash: v })} />}
+      <label className="field"><span>Drawn</span>
+        <select value={line.layer} onChange={(e) => onChange({ layer: e.target.value as 'back' | 'front' })}>
+          <option value="front">In front of images</option>
+          <option value="back">Behind images</option>
+        </select>
+      </label>
     </fieldset>
   );
 }
