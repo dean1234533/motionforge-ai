@@ -71,6 +71,6 @@ test('teams: owner invites a viewer, the viewer gets a read-only team project', 
   await expect(viewer.getByRole('button', { name: 'Upload image' })).toBeDisabled();
   await expect(viewer.locator('#prompt')).toBeDisabled();
 
-  // image generation is honestly unavailable on a server without a provider
-  await expect(owner.getByText('Image generation is not set up on this server.')).toBeVisible();
+  // the server has Cloudflare AI bound, so the owner can create images from a description
+  await expect(owner.getByText('Describe an image')).toBeVisible();
 });
