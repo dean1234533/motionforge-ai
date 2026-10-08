@@ -5,6 +5,8 @@ import { Auth } from './pages/Auth';
 import { Billing } from './pages/Billing';
 import { Dashboard } from './pages/Dashboard';
 import { Docs } from './pages/Docs';
+import { Invite } from './pages/Invite';
+import { Teams } from './pages/Teams';
 import { Editor } from './pages/Editor';
 import { Landing } from './pages/Landing';
 import { NewProject } from './pages/NewProject';
@@ -44,8 +46,10 @@ export function App() {
 
   const cloud = path.match(/^\/editor\/([0-9a-f-]{36})$/);
   const share = path.match(/^\/share\/([A-Za-z0-9_-]{16,64})$/);
+  const invite = path.match(/^\/invite\/([A-Za-z0-9_-]{16,64})$/);
 
   if (share) return <Share token={share[1]} />;
+  if (invite) return <Invite token={invite[1]} />;
   if (cloud) return <RequireAuth><Editor key={cloud[1]} initialPrompt={params.get('prompt') ?? ''} projectId={cloud[1]} /></RequireAuth>;
   switch (path) {
     case '/editor':
@@ -58,6 +62,8 @@ export function App() {
       return <RequireAuth><Dashboard /></RequireAuth>;
     case '/new':
       return <RequireAuth><NewProject /></RequireAuth>;
+    case '/teams':
+      return <RequireAuth><Teams /></RequireAuth>;
     case '/settings':
       return <RequireAuth><Settings /></RequireAuth>;
     case '/billing':
