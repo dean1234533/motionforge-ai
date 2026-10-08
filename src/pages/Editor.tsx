@@ -478,6 +478,11 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
       say('ai', 'Upload an image or use the sample bird first, then describe how it should move.');
       return;
     }
+    const problem = modeProblem(mode);
+    if (problem) {
+      say('ai', problem);
+      return;
+    }
     // Server jobs are used for the paid modes, and for "free" when the server has an AI that understands prompts.
     const serverFree = serverModes.find((m) => m.mode === 'free');
     if (projectId && (mode !== 'free' || (serverFree && serverFree.provider !== 'local-rules'))) {
@@ -755,6 +760,21 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     }
   };
 
+  /** Why a generation mode cannot be used right now, in plain words (null when it can). */
+  function modeProblem(m: GenerationMode): string | null {
+    if (m === 'free') return null;
+    if (!projectId) {
+      return session.user
+        ? 'Fast, Professional and your own key work inside a saved project. Open one from Projects (or create a new one), then pick this mode again.'
+        : 'Sign in and open a saved project to use Fast, Professional or your own key.';
+    }
+    if (serverModes.length === 0) return 'Could not check what this server supports. Refresh the page and try again.';
+    if (serverModes.find((s) => s.mode === m)?.available) return null;
+    if (m === 'fast') return 'Fast is not set up on this server yet. The person who runs it needs to add REPLICATE_API_TOKEN.';
+    if (m === 'professional') return 'Professional is not set up yet. The person who runs it needs to choose a video model (REPLICATE_PRO_MODEL).';
+    return 'This mode is not available on this server.';
+  }
+
   const hasObjects = scene.objects.length > 0;
 
   // ---- export view -------------------------------------------------------
@@ -779,8 +799,8 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
             <span className="sr-only">Generation mode</span>
             <select value={mode} onChange={(e) => setMode(e.target.value as GenerationMode)} aria-label="Generation mode">
               {Object.values(PROVIDER_SETS).map((p) => (
-                <option key={p.mode} value={p.mode} disabled={projectId ? !serverModes.find((s) => s.mode === p.mode)?.available : !p.available}>
-                  {p.label}{(projectId ? serverModes.find((s) => s.mode === p.mode)?.available : p.available) ? '' : projectId ? ' (not set up)' : ' (sign in to use)'}
+                <option key={p.mode} value={p.mode}>
+                  {p.label}{modeProblem(p.mode) ? ' (see note below)' : ''}
                 </option>
               ))}
             </select>
@@ -1048,6 +1068,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
           />
           <button type="submit" className="btn primary" disabled={readOnly || !prompt.trim() || (job !== null && job.stage !== 'Failed' && job.stage !== 'Complete')}>Send</button>
         </form>
+        {modeProblem(mode) && <p className="error small-note" role="status">{modeProblem(mode)}</p>}
         <p className="muted small-note">
           {projectId && mode !== 'free' && modeInfo
             ? `Using ${modeInfo.provider ?? 'no provider'} · estimated cost: ${modeInfo.cost === 0 ? '0 credits (your own key)' : `${modeInfo.cost} credits`}`
