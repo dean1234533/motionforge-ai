@@ -199,7 +199,7 @@ table { display: block; overflow-x: auto; max-width: 100%; }
 /* Touch screens: bigger targets, and inputs at 16px so iOS does not zoom in on focus. */
 @media (pointer: coarse) {
   .btn { min-height: 44px; }
-  .btn.small { min-height: 40px; padding: .4em .8em; }
+  .btn.small { min-height: 40px; min-width: 40px; padding: .4em .8em; }
   input[type=text], input[type=number], input[type=password], select { min-height: 44px; font-size: 16px; }
   input[type=range] { min-height: 32px; }
   input[type=color] { min-height: 44px; width: 100%; }
