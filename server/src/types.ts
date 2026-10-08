@@ -38,6 +38,15 @@ export interface Env {
   REPLICATE_PRO_VERSION?: string;
   /** Name of the model's image input field (varies by model). */
   REPLICATE_IMAGE_FIELD?: string;
+  /** Replicate upscaling model version, and its input field names. */
+  REPLICATE_UPSCALE_VERSION?: string;
+  REPLICATE_UPSCALE_IMAGE_FIELD?: string;
+  REPLICATE_UPSCALE_SCALE_FIELD?: string;
+  /** Image generation: the platform key (optional if every user brings their own) and the model name. */
+  OPENAI_API_KEY?: string;
+  OPENAI_IMAGE_MODEL?: string;
+  /** Set to "1" if the model supports background:"transparent". */
+  OPENAI_IMAGE_TRANSPARENT?: string;
 }
 
 export interface UserRow {
