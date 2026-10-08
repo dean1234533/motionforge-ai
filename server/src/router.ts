@@ -12,6 +12,8 @@ import { providersFromEnv, toolsFromEnv } from './replicate';
 import { createShare, getShared, listShares, revokeShare } from './shares';
 import { acceptInvite, createTeam, deleteTeam, getTeam, inviteMember, listTeams, previewInvite, removeMember, revokeInvite, setMemberRole } from './teams';
 import { projectAccess } from './access';
+import { withDefaults } from './env';
+import type { RawEnv } from './env';
 import { ensureSchema } from './schema';
 import { sendMail } from './mail';
 import type { Env, UserRow } from './types';
@@ -40,7 +42,7 @@ function secure(res: Response): Response {
   return res;
 }
 
-export async function handle(req: Request, env: Env, deps: Deps = defaults, ctx?: Ctx): Promise<Response> {
+export async function handle(req: Request, env: RawEnv, deps: Deps = defaults, ctx?: Ctx): Promise<Response> {
   try {
     return secure(await route(req, env, deps, ctx));
   } catch (e) {
@@ -61,10 +63,9 @@ async function readBytes(req: Request, max: number): Promise<Uint8Array> {
 const bin = (bytes: Uint8Array, type: string, cache = 'private, max-age=300') =>
   new Response(bytes as unknown as BodyInit, { headers: { 'content-type': type, 'cache-control': cache, 'content-security-policy': "default-src 'none'" } });
 
-async function route(req: Request, rawEnv: Env, deps: Deps, ctx?: Ctx): Promise<Response> {
+async function route(req: Request, rawEnv: RawEnv, deps: Deps, ctx?: Ctx): Promise<Response> {
   const url = new URL(req.url);
-  // Links in Stripe and email default to the address the app is being served from.
-  const env: Env = rawEnv.APP_URL ? rawEnv : { ...rawEnv, APP_URL: url.origin };
+  const env: Env = withDefaults(rawEnv, url.origin);
   const path = url.pathname;
   const method = req.method;
   const db = env.DB;
