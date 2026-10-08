@@ -7,7 +7,7 @@ interface Summary {
   configured: boolean;
   plan: string;
   status: string;
-  plans: { id: string; label: string; credits: number }[];
+  plans: { id: string; label: string; credits: number; projects: number; features: string[] }[];
   ledger: { delta: number; reason: string; createdAt: number }[];
 }
 
@@ -58,6 +58,7 @@ export function Billing({ status }: { status: string | null }) {
               <li key={p.id}>
                 <b>{p.label}</b>
                 <span>{p.credits} credits{p.id === 'free' ? ' every month' : ' with each billing period'}</span>
+                <ul className="plain-list">{p.features.map((f) => <li key={f}>{f}</li>)}</ul>
                 {p.id === 'free' ? (
                   <span className="muted">{summary.plan === 'free' ? 'Your current plan' : 'Applies if you cancel'}</span>
                 ) : summary.plan === p.id ? (
