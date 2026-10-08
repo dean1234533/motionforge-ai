@@ -14,6 +14,8 @@ In the Cloudflare dashboard: **Workers & Pages > Create > Import a repository**,
 
 The repo's [wrangler.jsonc](wrangler.jsonc) tells Wrangler what to create. On the first deploy it **creates the D1 database and R2 bucket for you**, and the Worker **creates its own tables** the first time it runs. There is no separate migration step.
 
+If your Cloudflare account has never used R2, you may need to switch it on once first (**R2 Object Storage** in the dashboard; it asks you to accept terms and may ask for a payment method, though the free allowance is generous). If a deploy ever fails with an R2 error, that is the first thing to check. As a manual alternative, create a bucket yourself, then change the line in `wrangler.jsonc` to `{ "binding": "FILES", "bucket_name": "your-bucket-name" }`.
+
 Then add one secret (**Settings > Variables and Secrets**):
 
 - `KEY_ENCRYPTION_SECRET` — generate with `openssl rand -base64 32`. It encrypts users' saved API keys. Keep a copy; if you lose it, saved keys become unreadable. Without it, everything else works but saving API keys is switched off.
