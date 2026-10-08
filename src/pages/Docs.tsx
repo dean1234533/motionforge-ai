@@ -40,8 +40,18 @@ export function Docs() {
         <h2>Plain-English commands</h2>
         <p>Try “make the bird fly more slowly”, “make the wings flap faster”, “move the ending position higher”, “make it smaller on mobile”, “reverse the direction” or “make it feel more cinematic”. A description of a new movement replaces the selected layer's motion.</p>
 
+        <h2>Effects, shapes and lines</h2>
+        <p>Beyond images you can add particle <b>effects</b> (smoke, fire, water, sparkles, snow and rain), simple <b>shapes</b> and <b>lines</b>. Each is a layer with its own path and settings. MotionForge picks the right way to draw each one: images and light particle effects use canvas, heavy particle scenes (250 or more particles) use WebGL when the browser supports it, shapes are plain HTML/CSS elements, and lines are SVG that draw themselves in as you scroll.</p>
+        <p>A layer can <b>follow another layer</b> (put fire behind a rocket, or trace a bird's flight path with a line) and can have <b>parallax</b>, drifting against the scroll to create depth. Try “add smoke behind it”, “add rain”, “add a line showing its path” or “give it more depth”.</p>
+
+        <h2>Generating video and images</h2>
+        <p>With an account, the Fast and Professional modes turn a still into video. The subject is filmed on a flat green or blue screen, and that colour is keyed out of every frame so you get transparent frames. “Create with AI” makes new images from a description, and “Upscale” enlarges an image so frames are sharper. Each shows its cost and asks before it spends credits; with your own provider key they cost no credits.</p>
+
+        <h2>Teams and plans</h2>
+        <p>The Professional plan can create teams. Invite people by email: owners choose editor or viewer, and the invitation link works only for that address. Everyone on a team can open its projects; viewers can look and export, editors can change them. Free exports carry a small “Made with MotionForge” badge, Creator and Professional exports do not and use sharper frames, and Professional adds lighter-file options, a commercial licence and priority processing.</p>
+
         <h2>Installing an export</h2>
-        <p>The export screen has a step-by-step guide for HTML, Webflow, WordPress and React. The ZIP also contains a <code>README.txt</code> with the same steps.</p>
+        <p>The export screen has a step-by-step guide for HTML, Webflow, WordPress and React. The ZIP also contains a <code>README.txt</code> with the same steps, a ready-to-upload <b>WordPress plugin</b> (it adds a <code>[motionforge]</code> shortcode) and a licence file.</p>
 
         <h2>Good to know</h2>
         <ul>
