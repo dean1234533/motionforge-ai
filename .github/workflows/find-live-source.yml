@@ -1,0 +1,30 @@
+name: Find live source
+# Builds the website from several past commits and prints each build's file names, so the one that matches the live site can be found.
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sha:
+          - 6eb999b92af7ff52d83b4456cd34f1fb3b73f610
+          - 83d77adccfc98e76292057dd8e0346dc3f300aad
+          - a6f8a74bdeabee2bd84eff7c1833551dd8bb82ae
+          - d844b4950a5bc9fecd1fd315efdbd791e2ad03fa
+          - 39ee4bd4f5062bf027cd7605eaf8aba72fb59437
+          - 8b4d22c7f629649b42cd8ca1ee2d23661b303cb6
+          - 0db220fa026b34625f909af6fc4e2ecf6681e70d
+          - a7b2059b1d9a37d6a5ed7ed58f4a2b07bd8f9d5e
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git checkout ${{ matrix.sha }} || git checkout $(git rev-parse ${{ matrix.sha }})
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install >/dev/null 2>&1
+      - run: npx vite build 2>&1 | grep -E "dist/assets|error" 
+      - run: echo "RESULT ${{ matrix.sha }} => $(ls dist/assets | tr '\n' ' ')"
