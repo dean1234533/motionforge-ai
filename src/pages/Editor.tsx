@@ -131,6 +131,8 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
   const [serverModes, setServerModes] = useState<ModeInfo[]>([]);
   const [showShare, setShowShare] = useState(false);
   const aborted = useRef(false);
+  /** True while there are edits the server has not confirmed yet. */
+  const dirty = useRef(false);
   /** The temporary chroma-screen copy of an image sent to a video model. */
   const chroma = useRef<{ id: string; key: KeyColor } | null>(null);
   const modeInfo = serverModes.find((m) => m.mode === mode);
@@ -234,11 +236,15 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
   useEffect(() => {
     if (restoring) return;
     setSaveState('saving');
+    if (projectId && !readOnly) dirty.current = true;
     const t = setTimeout(() => {
       if (projectId) {
         if (readOnly) return;
         api('PUT', `/api/projects/${projectId}`, { scene })
-          .then(() => setSaveState('saved'))
+          .then(() => {
+            dirty.current = false;
+            setSaveState('saved');
+          })
           .catch(() => setSaveState('error'));
         return;
       }
@@ -257,6 +263,24 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     }, 500);
     return () => clearTimeout(t);
   }, [scene, assets, selectedId, restoring]);
+
+  // If the page is closed or reloaded before the half-second autosave fires, still send the last edit.
+  useEffect(() => {
+    if (!projectId) return;
+    const flush = () => {
+      if (!dirty.current) return;
+      dirty.current = false;
+      void fetch(`/api/projects/${projectId}`, {
+        method: 'PUT',
+        keepalive: true,
+        credentials: 'same-origin',
+        headers: { 'x-requested-with': 'motionforge', 'content-type': 'application/json' },
+        body: JSON.stringify({ scene: sceneRef.current }),
+      }).catch(() => undefined);
+    };
+    window.addEventListener('pagehide', flush);
+    return () => window.removeEventListener('pagehide', flush);
+  }, [projectId]);
 
   // ---- preview bridge ----------------------------------------------------
   const framesMap = useMemo(() => Object.fromEntries(assets.map((a) => [a.id, a.frames])), [assets]);
