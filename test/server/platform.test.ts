@@ -226,7 +226,8 @@ describe('Replicate provider (mocked HTTP; not verified against the live service
     expect(Object.fromEntries(modes.map((m) => [m.mode, m.available]))).toEqual({ free: true, fast: true, professional: false, byok: true });
     const bare = await setup({ providers: undefined });
     const bareModes = (await bare.call('GET', '/api/modes', undefined, bare.u.cookie)).body.modes as { mode: string; available: boolean }[];
-    expect(bareModes.filter((m) => m.available).map((m) => m.mode)).toEqual(['free']);
+    // bring-your-own-key needs no server setup, so it is always offered
+    expect(bareModes.filter((m) => m.available).map((m) => m.mode)).toEqual(['free', 'byok']);
   });
 
   it('starts a prediction, parks the job, resumes until it succeeds, and stores the video', async () => {
