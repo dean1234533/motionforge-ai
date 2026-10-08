@@ -123,6 +123,21 @@ summary { cursor: pointer; font-weight: 600; }
 .log p { margin: 2px 0; }
 .log .ai { color: var(--muted); }
 
+/* accounts, dashboard, sharing */
+.row.between { justify-content: space-between; }
+.error { color: var(--danger); }
+.ok { color: var(--ok); }
+.center-text { text-align: center; padding: 40px 20px; }
+.appnav nav a { color: var(--muted); text-decoration: none; }
+.appnav nav a.is-current, .appnav nav a:hover { color: var(--text); }
+.card-form { max-width: 420px; margin: 40px auto; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 24px; display: grid; gap: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+.empty-card { background: var(--panel); border: 1px dashed var(--border); border-radius: 14px; padding: 32px; text-align: center; }
+.share { min-height: 100vh; background: #eef2f7; color: #10202f; }
+.share .brand { color: #10202f; }
+.share-bar { padding: 12px 20px; position: relative; z-index: 2; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid; place-items: center; z-index: 20; padding: 16px; }
+.modal-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px; width: min(520px, 100%); max-height: 90vh; overflow: auto; }
+
 /* export */
 .export { min-height: 100vh; }
 .export-grid { display: grid; grid-template-columns: minmax(300px, 420px) minmax(0, 1fr); gap: 24px; padding: 24px; }
