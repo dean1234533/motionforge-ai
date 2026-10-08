@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { ensureSchema } from '../../server/src/schema';
 import { resumeJobs } from '../../server/src/jobs';
+import { withDefaults } from '../../server/src/env';
 import { handle, resolveRegistry } from '../../server/src/router';
 import type { Deps } from '../../server/src/router';
 import { defaultProviders } from '../../server/src/providers';
@@ -56,7 +57,7 @@ export function makeApp(deps: Partial<Deps> = {}, envExtra: Partial<Env> = {}) {
   const sqlite = new Database(':memory:');
   sqlite.pragma('foreign_keys = ON');
   const files = fakeR2();
-  const env: Env = { DB: sqliteD1(sqlite), FILES: files, KEY_ENCRYPTION_SECRET: SECRET, ...envExtra };
+  const env = { DB: sqliteD1(sqlite), FILES: files, KEY_ENCRYPTION_SECRET: SECRET, ...envExtra } as Env;
   const pending: Promise<unknown>[] = [];
   const full: Deps = { providers: defaultProviders, fetchFn: async () => new Response('{}'), ...deps };
 
@@ -94,7 +95,8 @@ export function makeApp(deps: Partial<Deps> = {}, envExtra: Partial<Env> = {}) {
   /** Age parked jobs and run the cron resumer once. */
   async function resume() {
     sqlite.prepare('UPDATE jobs SET updated_at = updated_at - 100').run();
-    await resumeJobs(env.DB, env, resolveRegistry(env, full));
+    const withFiles = withDefaults(env);
+    await resumeJobs(withFiles.DB, withFiles, resolveRegistry(withFiles, full));
   }
 
   let n = 0;
