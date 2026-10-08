@@ -1,4 +1,4 @@
-import type { EffectSettings, EffectType, Scene, SceneObject } from './schema';
+import type { EffectSettings, EffectType, Scene, SceneObject, ShapeSettings } from './schema';
 
 export function emptyScene(): Scene {
   return {
