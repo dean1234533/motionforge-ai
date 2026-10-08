@@ -4,8 +4,6 @@ import type { RawEnv } from './env';
 import { handle, resolveRegistry } from './router';
 import { ensureSchema } from './schema';
 import type { Ctx } from './router';
-import type { Env } from './types';
-
 const fetchFn: typeof fetch = (...a) => fetch(...a);
 
 export default {
