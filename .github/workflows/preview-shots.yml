@@ -30,9 +30,11 @@ jobs:
             await page.waitForTimeout(2000);
             await page.getByRole('tab', { name: 'Layers', exact: true }).click();
             await page.getByRole('tab', { name: 'Timing', exact: true }).click();
+            await page.waitForTimeout(500);
             await page.screenshot({ path: `shots/${name}-1-timing.png` });
             await page.getByRole('tab', { name: 'Add', exact: true }).click();
             await page.getByRole('tab', { name: 'Look', exact: true }).click();
+            await page.waitForTimeout(500);
             await page.screenshot({ path: `shots/${name}-2-add-look.png` });
             if (name === 'phone') {
               await page.getByRole('heading', { name: 'Properties' }).scrollIntoViewIfNeeded();
