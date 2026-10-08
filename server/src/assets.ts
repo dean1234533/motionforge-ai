@@ -1,4 +1,5 @@
 import { sanitizeFilename } from '../../src/lib/sanitize';
+import { projectAccess } from './access';
 import { HttpError } from './http';
 import type { Env } from './types';
 
@@ -16,21 +17,17 @@ export function sniffImage(b: Uint8Array): string | null {
   return null;
 }
 
-export const assetKey = (userId: string, projectId: string, assetId: string) => `u/${userId}/p/${projectId}/a/${assetId}`;
-const framesKey = (userId: string, projectId: string, assetId: string) => `${assetKey(userId, projectId, assetId)}.frames.json`;
-
-async function requireProject(env: Env, userId: string, projectId: string): Promise<void> {
-  const p = await env.DB.prepare('SELECT id FROM projects WHERE id = ? AND user_id = ?').bind(projectId, userId).first();
-  if (!p) throw new HttpError(404, 'Project not found.');
-}
+// Files live under the project creator, so teammates and the creator see the same files.
+export const assetKey = (ownerId: string, projectId: string, assetId: string) => `u/${ownerId}/p/${projectId}/a/${assetId}`;
+const framesKey = (ownerId: string, projectId: string, assetId: string) => `${assetKey(ownerId, projectId, assetId)}.frames.json`;
 
 export function assertAssetId(id: string): void {
   if (!ID.test(id)) throw new HttpError(400, 'Invalid asset id.');
 }
 
-export async function saveAsset(env: Env, userId: string, projectId: string, assetId: string, rawName: string, bytes: Uint8Array) {
+export async function saveAsset(env: Env, actorId: string, projectId: string, assetId: string, rawName: string, bytes: Uint8Array, hd = false) {
   assertAssetId(assetId);
-  await requireProject(env, userId, projectId);
+  const { ownerId } = await projectAccess(env.DB, actorId, projectId, 'write');
   if (bytes.length === 0) throw new HttpError(400, 'That file is empty.');
   if (bytes.length > MAX_ASSET_BYTES) throw new HttpError(413, 'Images can be up to 5 MB.');
   const mime = sniffImage(bytes);
@@ -40,43 +37,51 @@ export async function saveAsset(env: Env, userId: string, projectId: string, ass
     const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM assets WHERE project_id = ?').bind(projectId).first<{ n: number }>();
     if ((count?.n ?? 0) >= MAX_ASSETS_PER_PROJECT) throw new HttpError(409, 'This project has reached its image limit.');
   }
-  await env.FILES.put(assetKey(userId, projectId, assetId), bytes, { httpMetadata: { contentType: mime } });
+  await env.FILES.put(assetKey(ownerId, projectId, assetId), bytes, { httpMetadata: { contentType: mime } });
   await env.DB.prepare(
-    `INSERT INTO assets(project_id, asset_id, user_id, name, mime, bytes, has_frames, created_at) VALUES(?, ?, ?, ?, ?, ?, 0, ?)
-     ON CONFLICT(project_id, asset_id) DO UPDATE SET name = excluded.name, mime = excluded.mime, bytes = excluded.bytes, has_frames = 0`,
+    `INSERT INTO assets(project_id, asset_id, user_id, name, mime, bytes, has_frames, hd, created_at) VALUES(?, ?, ?, ?, ?, ?, 0, ?, ?)
+     ON CONFLICT(project_id, asset_id) DO UPDATE SET name = excluded.name, mime = excluded.mime, bytes = excluded.bytes, has_frames = 0, hd = excluded.hd`,
   )
-    .bind(projectId, assetId, userId, sanitizeFilename(rawName), mime, bytes.length, now())
+    .bind(projectId, assetId, ownerId, sanitizeFilename(rawName), mime, bytes.length, hd ? 1 : 0, now())
     .run();
   // A replaced source invalidates any saved generated frames.
-  await env.FILES.delete(framesKey(userId, projectId, assetId));
+  await env.FILES.delete(framesKey(ownerId, projectId, assetId));
 }
 
-export async function listAssets(env: Env, userId: string, projectId: string) {
-  await requireProject(env, userId, projectId);
-  const { results } = await env.DB.prepare('SELECT asset_id, name, mime, bytes, has_frames FROM assets WHERE project_id = ? ORDER BY created_at')
+export async function listAssets(env: Env, actorId: string, projectId: string) {
+  await projectAccess(env.DB, actorId, projectId, 'read');
+  const { results } = await env.DB.prepare('SELECT asset_id, name, mime, bytes, has_frames, hd FROM assets WHERE project_id = ? ORDER BY created_at')
     .bind(projectId)
-    .all<{ asset_id: string; name: string; mime: string; bytes: number; has_frames: number }>();
-  return results.map((a) => ({ id: a.asset_id, name: a.name, mime: a.mime, bytes: a.bytes, hasFrames: a.has_frames === 1 }));
+    .all<{ asset_id: string; name: string; mime: string; bytes: number; has_frames: number; hd: number }>();
+  return results.map((a) => ({ id: a.asset_id, name: a.name, mime: a.mime, bytes: a.bytes, hasFrames: a.has_frames === 1, hd: a.hd === 1 }));
 }
 
-export async function readAsset(env: Env, userId: string, projectId: string, assetId: string) {
+/** No access check: callers must already have verified access (or be serving a share link). */
+export async function readAssetRaw(env: Env, ownerId: string, projectId: string, assetId: string) {
   assertAssetId(assetId);
-  const row = await env.DB.prepare('SELECT mime FROM assets WHERE project_id = ? AND asset_id = ? AND user_id = ?').bind(projectId, assetId, userId).first<{ mime: string }>();
-  const obj = row ? await env.FILES.get(assetKey(userId, projectId, assetId)) : null;
+  const row = await env.DB.prepare('SELECT mime FROM assets WHERE project_id = ? AND asset_id = ? AND user_id = ?').bind(projectId, assetId, ownerId).first<{ mime: string }>();
+  const obj = row ? await env.FILES.get(assetKey(ownerId, projectId, assetId)) : null;
   if (!row || !obj) return null;
   return { bytes: new Uint8Array(await obj.arrayBuffer()), type: row.mime };
 }
 
-export async function deleteAsset(env: Env, userId: string, projectId: string, assetId: string) {
+export async function readAsset(env: Env, actorId: string, projectId: string, assetId: string) {
+  const { ownerId } = await projectAccess(env.DB, actorId, projectId, 'read');
+  return readAssetRaw(env, ownerId, projectId, assetId);
+}
+
+export async function deleteAsset(env: Env, actorId: string, projectId: string, assetId: string) {
   assertAssetId(assetId);
-  const r = await env.DB.prepare('DELETE FROM assets WHERE project_id = ? AND asset_id = ? AND user_id = ?').bind(projectId, assetId, userId).run();
+  const { ownerId } = await projectAccess(env.DB, actorId, projectId, 'write');
+  const r = await env.DB.prepare('DELETE FROM assets WHERE project_id = ? AND asset_id = ?').bind(projectId, assetId).run();
   if (!r.meta.changes) throw new HttpError(404, 'Image not found.');
-  await env.FILES.delete([assetKey(userId, projectId, assetId), framesKey(userId, projectId, assetId)]);
+  await env.FILES.delete([assetKey(ownerId, projectId, assetId), framesKey(ownerId, projectId, assetId)]);
 }
 
 /** Generated frames are stored as a JSON array of image data URLs. */
-export async function saveFrames(env: Env, userId: string, projectId: string, assetId: string, text: string) {
+export async function saveFrames(env: Env, actorId: string, projectId: string, assetId: string, text: string) {
   assertAssetId(assetId);
+  const { ownerId } = await projectAccess(env.DB, actorId, projectId, 'write');
   if (text.length > MAX_FRAMES_BYTES) throw new HttpError(413, 'Those frames are too large.');
   let frames: unknown;
   try {
@@ -86,17 +91,22 @@ export async function saveFrames(env: Env, userId: string, projectId: string, as
   }
   const ok = Array.isArray(frames) && frames.length >= 1 && frames.length <= 240 && frames.every((f) => typeof f === 'string' && /^data:image\/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+$/.test(f));
   if (!ok) throw new HttpError(400, 'Frames must be 1 to 240 base64 image data URLs.');
-  const r = await env.DB.prepare('UPDATE assets SET has_frames = 1 WHERE project_id = ? AND asset_id = ? AND user_id = ?').bind(projectId, assetId, userId).run();
+  const r = await env.DB.prepare('UPDATE assets SET has_frames = 1 WHERE project_id = ? AND asset_id = ?').bind(projectId, assetId).run();
   if (!r.meta.changes) throw new HttpError(404, 'Image not found.');
-  await env.FILES.put(framesKey(userId, projectId, assetId), text, { httpMetadata: { contentType: 'application/json' } });
+  await env.FILES.put(framesKey(ownerId, projectId, assetId), text, { httpMetadata: { contentType: 'application/json' } });
 }
 
-export async function readFrames(env: Env, ownerId: string, projectId: string, assetId: string): Promise<string | null> {
+export async function readFramesRaw(env: Env, ownerId: string, projectId: string, assetId: string): Promise<string | null> {
   assertAssetId(assetId);
   const row = await env.DB.prepare('SELECT has_frames FROM assets WHERE project_id = ? AND asset_id = ? AND user_id = ?').bind(projectId, assetId, ownerId).first<{ has_frames: number }>();
   if (!row || row.has_frames !== 1) return null;
   const obj = await env.FILES.get(framesKey(ownerId, projectId, assetId));
   return obj ? new TextDecoder().decode(await obj.arrayBuffer()) : null;
+}
+
+export async function readFrames(env: Env, actorId: string, projectId: string, assetId: string) {
+  const { ownerId } = await projectAccess(env.DB, actorId, projectId, 'read');
+  return readFramesRaw(env, ownerId, projectId, assetId);
 }
 
 export async function putJobFile(env: Env, jobId: string, name: string, bytes: Uint8Array, type: string) {
