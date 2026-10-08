@@ -33,3 +33,19 @@ jobs:
         with:
           name: playwright-results
           path: test-results
+  e2e-cloud:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - run: npx playwright test -c playwright.cloud.config.ts
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-cloud-results
+          path: test-results
