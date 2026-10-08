@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 360" width="600" height="360">
+  <defs>
+    <linearGradient id="wing" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4f86c6"/>
+      <stop offset="1" stop-color="#1b3a5c"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f7fb"/>
+      <stop offset="1" stop-color="#b9c6d6"/>
+    </linearGradient>
+    <path id="w" d="M300 170 C240 92 130 52 18 72 C70 92 92 112 62 142 C112 136 142 152 120 188 C172 172 212 192 300 218 Z"/>
+  </defs>
+  <path d="M278 270 L300 346 L322 270 Z" fill="#1b3a5c"/>
+  <use href="#w" fill="url(#wing)"/>
+  <use href="#w" fill="url(#wing)" transform="translate(600 0) scale(-1 1)"/>
+  <ellipse cx="300" cy="212" rx="36" ry="78" fill="url(#body)"/>
+  <ellipse cx="300" cy="140" rx="25" ry="27" fill="#e6edf5"/>
+  <path d="M300 118 L311 138 L300 152 L289 138 Z" fill="#f2a33a"/>
+  <circle cx="290" cy="136" r="3.5" fill="#10202f"/>
+  <circle cx="310" cy="136" r="3.5" fill="#10202f"/>
+</svg>
