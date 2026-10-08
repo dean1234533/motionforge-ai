@@ -21,7 +21,7 @@ export function pruneAssets(input: ExportInput): ExportInput {
 }
 
 function json(value: unknown): string {
-  return JSON.stringify(value).replace(/</g, '\\u003c').replace(/ /g, '\\u2028').replace(/ /g, '\\u2029');
+  return JSON.stringify(value).replace(/</g, String.fromCharCode(92)+"u003c").replace(new RegExp(String.fromCharCode(91,8232,8233,93),"g"), "");
 }
 
 const PAGE_STYLE = 'html,body{margin:0;padding:0;background:#eef2f7}';
