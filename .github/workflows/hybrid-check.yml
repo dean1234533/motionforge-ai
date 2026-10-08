@@ -1,0 +1,29 @@
+name: Hybrid check
+# Checks that an older front end plus the newer server code builds, bundles and passes the server tests. Deploys nothing.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        default: 6eb999b92af7ff52d83b4456cd34f1fb3b73f610
+      overlay:
+        default: server wrangler.jsonc src/ai/localPlanner.ts
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: |
+          git fetch origin main
+          git checkout origin/main -- ${{ inputs.overlay }} test/server test/d1files.test.ts test/plans.test.ts test/schema.test.ts test/chroma.test.ts
+          git status --short | head -40
+      - run: npm install
+      - run: npx vite build
+      - run: npx wrangler deploy --dry-run --outdir /tmp/out 2>&1 | tail -15
+      - name: Server tests against this tree
+        run: npx vitest run test/server test/d1files.test.ts test/plans.test.ts test/schema.test.ts 2>&1 | tail -25
