@@ -218,10 +218,18 @@ export async function runJob(db: D1Database, env: Env, reg: Registry, jobId: str
 }
 
 /** Cron entry point: resume parked jobs, and rescue ones whose worker died mid-run. */
-export async function resumeJobs(db: D1Database, env: Env, reg: Registry): Promise<number> {
+export async function resumeJobs(db: D1Database, env: Env, reg: Registry, limit = 20): Promise<number> {
   const t = now();
   await db.prepare("UPDATE jobs SET status = 'queued' WHERE status = 'running' AND updated_at < ?").bind(t - 300).run();
-  const { results } = await db.prepare("SELECT id FROM jobs WHERE status = 'queued' AND updated_at < ? ORDER BY updated_at LIMIT 20").bind(t - 15).all<{ id: string }>();
+  // Priority processing: Professional-plan jobs go first, then oldest first.
+  const { results } = await db
+    .prepare(
+      `SELECT j.id FROM jobs j JOIN users u ON u.id = j.user_id
+       WHERE j.status = 'queued' AND j.updated_at < ?
+       ORDER BY (u.plan = 'professional') DESC, j.updated_at LIMIT ?`,
+    )
+    .bind(t - 15, limit)
+    .all<{ id: string }>();
   for (const r of results) await runJob(db, env, reg, r.id);
   return results.length;
 }
