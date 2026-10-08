@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { buildAsset } from '../ai/imagePipeline';
 import { planFromPrompt } from '../ai/localPlanner';
 import { emptyScene, newObject } from '../scene/defaults';
+import { useSession } from '../lib/session';
 import { parseScene } from '../scene/schema';
 
 const DEMO_PROMPT = 'Make this bird flap its wings and fly along a curved path from the bottom-left to the top-right as the user scrolls.';
@@ -65,18 +66,20 @@ const FAQ = [
   ['Do I need to code?', 'No. Upload an image, describe the motion, adjust it visually, and copy the result into your site.'],
   ['Does the export need MotionForge to keep working?', 'No. Exports are plain HTML, CSS and JavaScript with the frames included. They contain no account details or API keys.'],
   ['What does the free mode do?', 'It removes plain backgrounds in your browser and animates with paths, scale, rotation, opacity and a simulated wing flap. Nothing is uploaded anywhere.'],
-  ['When do Fast, Professional and bring-your-own-key arrive?', 'They need a server for accounts, encrypted keys and a job queue. The provider-adapter layer is already in place for them; the server is the next step.'],
+  ['When do Fast, Professional and bring-your-own-key arrive?', 'They run on the MotionForge server and only appear when the host has set up a provider. The Free mode always works in your browser, with no account.'],
   ['Is it accessible?', 'Exports respect the “reduce motion” setting and show a still frame instead.'],
 ];
 
 export function Landing() {
+  const { user } = useSession();
   return (
     <div className="landing">
       <header className="nav">
         <a className="brand" href="#/">MotionForge <span>AI</span></a>
         <nav aria-label="Main">
           <a href="#/docs">Docs</a>
-          <a className="btn primary" href="#/editor">Open editor</a>
+          {user ? <a href="#/dashboard">Your projects</a> : <a href="#/login">Log in</a>}
+          <a className="btn primary" href={user ? '#/new' : '#/signup'}>{user ? 'New project' : 'Sign up'}</a>
         </nav>
       </header>
 
@@ -126,7 +129,7 @@ export function Landing() {
         <h2 id="compare">Free and professional generation</h2>
         <table>
           <thead>
-            <tr><th scope="col" /><th scope="col">Free (available now)</th><th scope="col">Professional (needs server)</th></tr>
+            <tr><th scope="col" /><th scope="col">Free (available now)</th><th scope="col">Professional (needs provider setup)</th></tr>
           </thead>
           <tbody>
             <tr><th scope="row">Background removal</th><td>Plain backgrounds, in your browser</td><td>AI cut-out of complex scenes</td></tr>
@@ -138,7 +141,7 @@ export function Landing() {
 
       <section className="section" aria-labelledby="pricing">
         <h2 id="pricing">Pricing</h2>
-        <p className="muted">Billing is not live yet. The editor and exports are free to use today.</p>
+        <p className="muted">The editor and exports are free to use. Paid plans appear in your Billing page once the host has turned them on.</p>
         <ul className="cards">
           <li><b>Free</b><span>Basic motion tools, standard export, lower-resolution generations.</span></li>
           <li><b>Creator</b><span>More credits, premium models, higher-resolution export, no watermark. Coming soon.</span></li>
