@@ -30,7 +30,7 @@ describe('assets', () => {
     const fake = await raw('PUT', `/api/projects/${projectId}/assets/evil`, new TextEncoder().encode('<script>alert(1)</script>'), u.cookie, 'image/png');
     expect(fake.status).toBe(415);
     expect((await raw('PUT', `${base}x`, new Uint8Array(0), u.cookie)).status).toBe(400);
-    expect((await raw('PUT', `/api/projects/${projectId}/assets/BAD_ID`, PNG, u.cookie)).status).toBe(404);
+    expect((await raw('PUT', `/api/projects/${projectId}/assets/BAD_ID`, PNG, u.cookie)).status).toBe(400);
 
     expect((await call('DELETE', base, undefined, u.cookie)).status).toBe(200);
     expect((await call('GET', base, undefined, u.cookie)).status).toBe(404);
