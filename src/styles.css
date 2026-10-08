@@ -188,7 +188,8 @@ table { display: block; overflow-x: auto; max-width: 100%; }
   .editor > .banner { order: 1; }
   .center { order: 2; height: min(68vh, 560px); height: min(68dvh, 560px); min-height: 340px; padding: 12px 16px 8px; overflow: hidden; }
   .editor > .timeline { order: 3; }
-  .editor > .promptbar { order: 4; position: sticky; bottom: 0; z-index: 5; padding-bottom: calc(12px + env(safe-area-inset-bottom)); box-shadow: 0 -8px 20px rgba(0,0,0,.35); }
+  /* Last in the page and sticky to the bottom of the screen, so the prompt box is always within reach. */
+  .editor > .promptbar { order: 20; position: sticky; bottom: 0; z-index: 5; padding-bottom: calc(12px + env(safe-area-inset-bottom)); box-shadow: 0 -8px 20px rgba(0,0,0,.35); }
   .panel.left { order: 5; border: 0; border-top: 1px solid var(--border); }
   .panel.right { order: 6; border: 0; border-top: 1px solid var(--border); }
   .export-grid { grid-template-columns: 1fr; padding: 16px; }
