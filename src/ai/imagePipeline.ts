@@ -174,7 +174,7 @@ export async function buildAsset(source: string, onStage: (s: Stage) => void): P
   await yieldUI();
 
   onStage('Processing frames');
-  const frames = canvases.map(encode);
+  const frames = canvases.map(encodeCanvas);
   await yieldUI();
 
   onStage('Optimising assets');
@@ -184,7 +184,7 @@ export async function buildAsset(source: string, onStage: (s: Stage) => void): P
   return { frames, backgroundRemoved: removed.changed, bytes };
 }
 
-function encode(c: HTMLCanvasElement): string {
+export function encodeCanvas(c: HTMLCanvasElement): string {
   const webp = c.toDataURL('image/webp', 0.88);
   return webp.startsWith('data:image/webp') ? webp : c.toDataURL('image/png');
 }
