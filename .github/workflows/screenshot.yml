@@ -27,20 +27,20 @@ jobs:
           for (const [name, opts] of [['desktop', { viewport: { width: 1280, height: 800 } }], ['phone', { ...devices['Pixel 5'] }]]) {
             const ctx = await b.newContext(opts);
             const page = await ctx.newPage();
-            await page.goto(url + '/', { waitUntil: 'networkidle' });
+            await page.goto(url + '/', { waitUntil: 'domcontentloaded' });
             await page.waitForTimeout(2500);
             await page.screenshot({ path: `shots/${name}-1-landing-top.png` });
             await page.screenshot({ path: `shots/${name}-2-landing-full.png`, fullPage: true });
-            await page.goto(url + '/#/login', { waitUntil: 'networkidle' });
+            await page.goto(url + '/#/login', { waitUntil: 'domcontentloaded' });
             await page.waitForTimeout(500);
             await page.screenshot({ path: `shots/${name}-3-login.png` });
-            await page.goto(url + '/#/editor', { waitUntil: 'networkidle' });
+            await page.goto(url + '/#/editor', { waitUntil: 'domcontentloaded' });
             await page.getByRole('button', { name: 'Use sample bird' }).click();
             await page.waitForSelector('.frame iframe', { timeout: 60000 });
             await page.waitForTimeout(2500);
             await page.screenshot({ path: `shots/${name}-4-editor.png` });
             await page.screenshot({ path: `shots/${name}-5-editor-full.png`, fullPage: true });
-            await page.goto(url + '/#/docs', { waitUntil: 'networkidle' });
+            await page.goto(url + '/#/docs', { waitUntil: 'domcontentloaded' });
             await page.waitForTimeout(500);
             await page.screenshot({ path: `shots/${name}-6-docs.png` });
             await ctx.close();
@@ -49,6 +49,7 @@ jobs:
           JS
           node shot.mjs
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: shots
           path: shots
