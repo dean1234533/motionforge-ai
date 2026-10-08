@@ -1,5 +1,6 @@
 import { PendingError, localRulesProvider } from './providers';
 import { openaiImageProvider } from './openaiImage';
+import { workersAiImageProvider, workersAiPlannerProvider } from './workersAi';
 import type { ProviderRegistry, ServerProvider, ToolRegistry } from './providers';
 import type { Env } from './types';
 
@@ -152,7 +153,10 @@ export function replicateUpscaleProvider(cfg: UpscaleConfig): ServerProvider {
 export function toolsFromEnv(env: Env, fetchFn: typeof fetch): ToolRegistry {
   const tools: ToolRegistry = {};
   if (env.OPENAI_IMAGE_MODEL) {
+    // An operator who configures OpenAI image generation gets that; otherwise Cloudflare's built-in AI is used.
     tools['image-gen'] = openaiImageProvider({ model: env.OPENAI_IMAGE_MODEL, token: env.OPENAI_API_KEY, transparent: env.OPENAI_IMAGE_TRANSPARENT === '1', fetchFn });
+  } else if (env.AI) {
+    tools['image-gen'] = workersAiImageProvider(env.AI);
   }
   if (env.REPLICATE_UPSCALE_VERSION) {
     tools.upscale = replicateUpscaleProvider({
@@ -170,6 +174,8 @@ export function toolsFromEnv(env: Env, fetchFn: typeof fetch): ToolRegistry {
 export function providersFromEnv(env: Env, fetchFn: typeof fetch, base: ProviderRegistry): ProviderRegistry {
   const imageField = env.REPLICATE_IMAGE_FIELD ?? 'image';
   const reg: ProviderRegistry = { ...base };
+  // With the built-in AI, understanding the prompt in "free" mode uses a language model (with a rules fallback).
+  if (env.AI) reg.free = workersAiPlannerProvider(env.AI);
   if (env.REPLICATE_API_TOKEN && env.REPLICATE_FAST_VERSION) {
     reg.fast = replicateProvider({ version: env.REPLICATE_FAST_VERSION, token: env.REPLICATE_API_TOKEN, imageField, fetchFn });
   }
