@@ -1,5 +1,4 @@
 import { grantOnce } from './credits';
-import { b64, unb64 } from './crypto';
 import { HttpError } from './http';
 import type { D1Database, Env } from './types';
 
