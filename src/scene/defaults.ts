@@ -73,3 +73,32 @@ export function newEffect(id: string, type: EffectType, attachTo: string | null 
     ],
   };
 }
+
+/** A coloured circle or rectangle, drawn as an HTML/CSS element. */
+export function newShape(id: string, type: ShapeSettings["type"] = "circle"): SceneObject {
+  const base = newObject(id, "none", type === "circle" ? "Circle" : "Rectangle");
+  return {
+    ...base,
+    kind: "shape",
+    shape: { type, color: "#8ab4ff", widthPct: type === "circle" ? 8 : 14, heightPct: type === "circle" ? 14 : 10, radius: 12, layer: "front" },
+  };
+}
+
+/**
+ * A vector line drawn as SVG. With `traceId` it draws the path of that layer and reveals it as you scroll;
+ * otherwise it follows its own path keyframes.
+ */
+export function newLine(id: string, traceId: string | null = null): SceneObject {
+  const base = newObject(id, "none", traceId ? "Path trace" : "Line");
+  return {
+    ...base,
+    kind: "line",
+    line: { color: "#ffffff", width: 4, cap: "round", reveal: "draw", dash: 0, layer: "front" },
+    attachTo: traceId,
+    path: [
+      { progress: 0, x: 10, y: 80 },
+      { progress: 0.5, x: 50, y: 30 },
+      { progress: 1, x: 90, y: 70 },
+    ],
+  };
+}
