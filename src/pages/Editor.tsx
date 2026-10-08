@@ -8,9 +8,9 @@ import { PathOverlay } from '../editor/PathOverlay';
 import { useHistory } from '../editor/useHistory';
 import { buildPreviewHtml, buildSnippet, buildStandaloneHtml, buildZip } from '../export/build';
 import { sanitizeFilename, sanitizeText, slug, validateUpload } from '../lib/sanitize';
-import { emptyScene, newObject } from '../scene/defaults';
-import { EASINGS, parseScene } from '../scene/schema';
-import type { Keyframe, Scene, SceneObject } from '../scene/schema';
+import { EFFECT_LABELS, emptyScene, newEffect, newObject } from '../scene/defaults';
+import { EASINGS, EFFECT_TYPES, parseScene } from '../scene/schema';
+import type { EffectSettings, EffectType, Keyframe, Scene, SceneObject } from '../scene/schema';
 import { extractFrames } from '../ai/videoFrames';
 import { toUploadBlob } from '../ai/imagePipeline';
 import { api, uploadBinary, when } from '../lib/api';
@@ -21,6 +21,18 @@ interface Asset {
   name: string;
   source: string;
   frames: string[];
+  /** Upscaled images get higher-resolution frames. */
+  hd?: boolean;
+}
+
+interface ToolInfo {
+  kind: 'image-gen' | 'upscale';
+  label: string;
+  cost: number;
+  provider: string | null;
+  keyProvider: string | null;
+  available: boolean;
+  platformKey: boolean;
 }
 
 interface Saved {
@@ -64,7 +76,7 @@ interface ServerJob {
   status: 'queued' | 'running' | 'complete' | 'failed' | 'cancelled';
   stage: string;
   error: string | null;
-  result: { plan: { patch: Partial<SceneObject>; scrollLength?: number; summary: string } | null; videoUrl: string | null } | null;
+  result: { plan: { patch: Partial<SceneObject>; scrollLength?: number; summary: string } | null; videoUrl: string | null; assetId?: string | null } | null;
 }
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
@@ -115,6 +127,12 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
   const [showShare, setShowShare] = useState(false);
   const aborted = useRef(false);
   const modeInfo = serverModes.find((m) => m.mode === mode);
+  const [serverTools, setServerTools] = useState<ToolInfo[]>([]);
+  const [role, setRole] = useState<'owner' | 'editor' | 'viewer'>('owner');
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [payWithKey, setPayWithKey] = useState(false);
+  const [fxType, setFxType] = useState<EffectType>('smoke');
+  const readOnly = role === 'viewer';
 
   useEffect(() => {
     aborted.current = false;
@@ -125,9 +143,10 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
 
   useEffect(() => {
     if (!projectId) return;
-    api<{ modes: ModeInfo[]; balance: number }>('GET', '/api/modes')
+    api<{ modes: ModeInfo[]; tools: ToolInfo[]; balance: number }>('GET', '/api/modes')
       .then((r) => {
         setServerModes(r.modes);
+        setServerTools(r.tools);
         session.setCredits(r.balance);
       })
       .catch(() => undefined);
@@ -158,10 +177,11 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     (async () => {
       try {
         if (projectId) {
-          const { project } = await api<{ project: { name: string; scene: unknown } }>('GET', `/api/projects/${projectId}`);
+          const { project } = await api<{ project: { name: string; scene: unknown; role: 'owner' | 'editor' | 'viewer' } }>('GET', `/api/projects/${projectId}`);
           const parsedScene = parseScene(project.scene);
           if (!parsedScene.ok) throw new Error(parsedScene.error);
-          const { assets: list } = await api<{ assets: { id: string; name: string; hasFrames: boolean }[] }>('GET', `/api/projects/${projectId}/assets`);
+          setRole(project.role);
+          const { assets: list } = await api<{ assets: { id: string; name: string; hasFrames: boolean; hd: boolean }[] }>('GET', `/api/projects/${projectId}/assets`);
           const restored: Asset[] = [];
           for (const a of list) {
             const blob = await (await fetch(`/api/projects/${projectId}/assets/${a.id}`, { credentials: 'same-origin' })).blob();
@@ -171,7 +191,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
               const fr = await fetch(`/api/projects/${projectId}/assets/${a.id}/frames`, { credentials: 'same-origin' });
               if (fr.ok) frames = (await fr.json()) as string[];
             }
-            restored.push({ id: a.id, name: a.name, source, frames: frames ?? (await buildAsset(source, () => undefined)).frames });
+            restored.push({ id: a.id, name: a.name, source, hd: a.hd, frames: frames ?? (await buildAsset(source, () => undefined, a.hd ? 1024 : 512)).frames });
           }
           if (cancelled) return;
           setAssets(restored);
@@ -208,6 +228,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     setSaveState('saving');
     const t = setTimeout(() => {
       if (projectId) {
+        if (readOnly) return;
         api('PUT', `/api/projects/${projectId}`, { scene })
           .then(() => setSaveState('saved'))
           .catch(() => setSaveState('error'));
@@ -418,6 +439,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     if (edit) {
       if (edit.scene !== scene) commit(edit.scene);
       say('ai', edit.message);
+      if (edit.action) await runTool('image-gen', { prompt: edit.action.prompt, behind: edit.action.behind });
       return;
     }
     if (!sel) {
@@ -558,6 +580,113 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     }
   };
 
+  // ---- effects, image generation and upscaling --------------------------------
+  const addEffect = (type: EffectType) => {
+    if (scene.objects.length >= 20) {
+      setNotice('A scene can have up to 20 layers.');
+      return;
+    }
+    const follows = type !== 'snow' && sel ? sel.id : null;
+    const fx = newEffect(`${type}-${Math.random().toString(36).slice(2, 6)}`, type, follows);
+    commit({ ...scene, objects: [...scene.objects, fx] });
+    setSelectedId(fx.id);
+    say('ai', `Added ${EFFECT_LABELS[type].toLowerCase()}.${follows ? ' It follows the selected layer.' : ''}`);
+  };
+
+  const addGenerated = async (assetId: string, kind: 'image-gen' | 'upscale', opts: { assetId?: string; behind?: boolean }) => {
+    const hd = kind === 'upscale';
+    const blob = await (await fetch(`/api/projects/${projectId}/assets/${assetId}`, { credentials: 'same-origin' })).blob();
+    const source = await readFileAsDataUrl(new File([blob], assetId, { type: blob.type }));
+    const built = await buildAsset(source, (s) => setJob({ stage: s }), hd ? 1024 : 512);
+    const from = assets.find((a) => a.id === opts.assetId);
+    setAssets((prev) => [...prev, { id: assetId, name: hd ? `${(from?.name ?? 'image').replace(/\.[^.]+$/, '')}-hd` : assetId, source, frames: built.frames, hd }]);
+    const cur = sceneRef.current;
+    if (hd && opts.assetId) {
+      // Layers that used the original now use the sharper copy.
+      commit({ ...cur, objects: cur.objects.map((o) => (o.assetId === opts.assetId ? { ...o, assetId } : o)) });
+      return;
+    }
+    const layer: SceneObject = {
+      ...newObject(assetId, assetId, 'Generated image'),
+      widthPct: opts.behind ? 45 : 22,
+      parallax: opts.behind ? 0.6 : 0,
+      path: [
+        { progress: 0, x: 50, y: opts.behind ? 25 : 50 },
+        { progress: 1, x: 50, y: opts.behind ? 25 : 50 },
+      ],
+    };
+    commit({ ...cur, objects: opts.behind ? [layer, ...cur.objects] : [...cur.objects, layer] });
+    setSelectedId(layer.id);
+  };
+
+  const pollTool = async (jobId: string, kind: 'image-gen' | 'upscale', opts: { assetId?: string; behind?: boolean }): Promise<void> => {
+    const deadline = Date.now() + 20 * 60_000;
+    while (!aborted.current && Date.now() < deadline) {
+      const { job } = await api<{ job: ServerJob }>('GET', `/api/jobs/${jobId}`);
+      if (job.status === 'failed') {
+        setJob({
+          stage: 'Failed',
+          error: job.error ?? 'The job failed.',
+          retry: async () => {
+            try {
+              await api('POST', `/api/jobs/${jobId}/retry`, {});
+              setJob({ stage: kind === 'image-gen' ? 'Generating image' : 'Upscaling' });
+              await pollTool(jobId, kind, opts);
+            } catch (e) {
+              setJob({ stage: 'Failed', error: e instanceof Error ? e.message : 'Retry failed.' });
+            }
+          },
+        });
+        return;
+      }
+      if (job.status === 'complete') {
+        try {
+          if (!job.result?.assetId) throw new Error('The provider did not return an image.');
+          await addGenerated(job.result.assetId, kind, opts);
+          setJob({ stage: 'Complete' });
+          say('ai', kind === 'image-gen' ? 'Your image is ready and has been added as a layer.' : 'Upscaled. Your layers now use the sharper image.');
+          setTimeout(() => setJob((j) => (j?.stage === 'Complete' ? null : j)), 1200);
+        } catch (e) {
+          setJob({ stage: 'Failed', error: e instanceof Error ? e.message : 'Could not use the result.' });
+        }
+        const me = await api<{ credits: number }>('GET', '/api/me').catch(() => null);
+        if (me) session.setCredits(me.credits);
+        return;
+      }
+      if (job.status === 'cancelled') return setJob(null);
+      setJob({ stage: kind === 'image-gen' ? 'Generating image' : 'Upscaling' });
+      await wait(2500);
+    }
+  };
+
+  const runTool = async (kind: 'image-gen' | 'upscale', opts: { prompt?: string; assetId?: string; scale?: 2 | 4; behind?: boolean }) => {
+    const tool = serverTools.find((t) => t.kind === kind);
+    if (!projectId || !tool?.available) {
+      say('ai', 'That needs an image provider, which this server has not set up. You can still upload your own image.');
+      return;
+    }
+    const ownKey = payWithKey || !tool.platformKey;
+    const price = ownKey ? `no credits (it uses your own ${tool.keyProvider} key)` : `${tool.cost} credits (you have ${session.credits})`;
+    if (!window.confirm(`${kind === 'image-gen' ? 'Generate an image' : 'Upscale this image'}: this will use ${price} with ${tool.provider}. Continue?`)) return;
+    try {
+      setJob({ stage: kind === 'image-gen' ? 'Generating image' : 'Upscaling' });
+      const created = await api<{ job: ServerJob; credits: number }>('POST', '/api/jobs', {
+        projectId,
+        kind,
+        prompt: opts.prompt ?? 'upscale',
+        assetId: opts.assetId,
+        scale: opts.scale,
+        useOwnKey: ownKey,
+        keyProvider: ownKey ? tool.keyProvider : undefined,
+        idempotencyKey: crypto.randomUUID(),
+      });
+      session.setCredits(created.credits);
+      await pollTool(created.job.id, kind, opts);
+    } catch (e) {
+      setJob({ stage: 'Failed', error: e instanceof Error ? e.message : 'Could not start that.' });
+    }
+  };
+
   const hasObjects = scene.objects.length > 0;
 
   // ---- export view -------------------------------------------------------
@@ -598,7 +727,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
         </div>
         <div className="ed-top-group">
           {projectId && <span className="muted" title="Credits available">{session.credits} credits</span>}
-          {projectId && <button type="button" className="btn ghost" onClick={() => setShowShare(true)}>Share</button>}
+          {projectId && <button type="button" className="btn ghost" onClick={() => setShowShare(true)} disabled={readOnly}>Share</button>}
           <button type="button" className="btn ghost" onClick={history.undo} disabled={!history.canUndo}>Undo</button>
           <button type="button" className="btn ghost" onClick={history.redo} disabled={!history.canRedo}>Redo</button>
           <span className={`save save-${saveState}`} role="status">
@@ -616,8 +745,11 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
         </div>
       )}
 
+      {readOnly && <div className="banner info" role="status">You have view-only access to this project. Ask a team editor if you need to change it.</div>}
+
       <div className="ed-main">
         <aside className="panel left" aria-label="Assets and layers">
+          <fieldset disabled={readOnly} className="plain">
           <h2>Images</h2>
           <div className="row">
             <button type="button" className="btn" onClick={() => fileRef.current?.click()}>Upload image</button>
@@ -633,11 +765,54 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
                 <img src={a.frames[0]} alt="" />
                 <span className="grow" title={a.name}>{a.name}</span>
                 <button type="button" className="btn small ghost" onClick={() => addLayerFor(a)} aria-label={`Add another layer using ${a.name}`}>+ Layer</button>
+                {serverTools.find((t) => t.kind === 'upscale')?.available && (
+                  <button type="button" className="btn small ghost" onClick={() => void runTool('upscale', { assetId: a.id, scale: 2 })} aria-label={`Upscale ${a.name} to higher resolution`}>Upscale</button>
+                )}
                 <button type="button" className="btn small ghost" onClick={() => { replaceTarget.current = a.id; replaceRef.current?.click(); }} aria-label={`Replace ${a.name}`}>Replace</button>
                 <button type="button" className="btn small ghost danger" onClick={() => deleteAsset(a)} aria-label={`Delete ${a.name}`}>Delete</button>
               </li>
             ))}
           </ul>
+
+          <h2>Effects</h2>
+          <div className="row">
+            <label className="sr-only" htmlFor="fx-type">Effect type</label>
+            <select id="fx-type" value={fxType} onChange={(e) => setFxType(e.target.value as EffectType)}>
+              {EFFECT_TYPES.map((t) => <option key={t} value={t}>{EFFECT_LABELS[t]}</option>)}
+            </select>
+            <button type="button" className="btn small" onClick={() => addEffect(fxType)}>Add effect</button>
+          </div>
+          <p className="muted small-note">Smoke, fire, water and sparkles follow the selected layer. Snow falls across the whole scene.</p>
+
+          {projectId && (
+            <>
+              <h2>Create with AI</h2>
+              {serverTools.find((t) => t.kind === 'image-gen')?.available ? (
+                <>
+                  <label className="field"><span>Describe an image</span>
+                    <input type="text" value={aiPrompt} maxLength={200} onChange={(e) => setAiPrompt(e.target.value)} placeholder="a red hot air balloon" />
+                  </label>
+                  {(() => {
+                    const t = serverTools.find((x) => x.kind === 'image-gen')!;
+                    return (
+                      <>
+                        <div className="row">
+                          <button type="button" className="btn small primary" disabled={!aiPrompt.trim()} onClick={() => void runTool('image-gen', { prompt: aiPrompt })}>
+                            Generate image · {payWithKey || !t.platformKey ? 'your key' : `${t.cost} credits`}
+                          </button>
+                        </div>
+                        {t.platformKey && (
+                          <label className="check"><input type="checkbox" checked={payWithKey} onChange={(e) => setPayWithKey(e.target.checked)} /> Use my own {t.keyProvider} key instead of credits</label>
+                        )}
+                      </>
+                    );
+                  })()}
+                </>
+              ) : (
+                <p className="muted small-note">Image generation is not set up on this server.</p>
+              )}
+            </>
+          )}
 
           <h2>Layers</h2>
           {!hasObjects && <p className="muted">Layers appear here once you add an image. The last layer is drawn on top.</p>}
@@ -652,6 +827,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
               </li>
             ))}
           </ul>
+          </fieldset>
         </aside>
 
         <main className="center" aria-label="Live preview">
@@ -664,7 +840,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
                 srcDoc={previewHtml}
                 onLoad={() => post({ type: 'mf-scene', scene: sceneRef.current })}
               />
-              {sel && !sel.pinned && (
+              {sel && !sel.pinned && !sel.attachTo && (
                 <PathOverlay obj={sel} selected={pointIdx} onSelect={setPointIdx} onChange={setPath} />
               )}
             </div>
@@ -679,6 +855,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
         </main>
 
         <aside className="panel right" aria-label="Properties">
+          <fieldset disabled={readOnly} className="plain">
           <h2>Properties</h2>
           {!sel && <p className="muted">Select a layer to edit it.</p>}
           {sel && (
@@ -687,9 +864,10 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
                 <span>Name</span>
                 <input type="text" maxLength={60} value={sel.name} onChange={(e) => patchSel({ name: e.target.value || 'Layer' }, 'name')} />
               </label>
-              <Slider label="Size (% of width)" min={2} max={100} step={1} value={sel.widthPct} onChange={(v) => patchSel({ widthPct: v })} />
+              {sel.effect && <EffectControls effect={sel.effect} onChange={(p) => patchSel({ effect: { ...sel.effect!, ...p } }, `fx-${Object.keys(p)[0]}`)} />}
+              {!sel.effect && <Slider label="Size (% of width)" min={2} max={100} step={1} value={sel.widthPct} onChange={(v) => patchSel({ widthPct: v })} />}
               <Slider label="Mobile size multiplier" min={0.2} max={2} step={0.05} value={sel.mobileScale} onChange={(v) => patchSel({ mobileScale: v })} />
-              <Slider label="Wing flaps per scroll" min={0} max={60} step={1} value={sel.flapsPerScroll} onChange={(v) => patchSel({ flapsPerScroll: v })} />
+              {!sel.effect && <Slider label="Wing flaps per scroll" min={0} max={60} step={1} value={sel.flapsPerScroll} onChange={(v) => patchSel({ flapsPerScroll: v })} />}
               <Slider label="Body rise & fall" min={0} max={10} step={0.1} value={sel.bob} onChange={(v) => patchSel({ bob: v })} />
               <Triple label="Rotation (°)" min={-180} max={180} step={1} values={three(sel.rotation)} onChange={(v) => patchSel({ rotation: v }, 'rotation')} />
               <Triple label="Scale" min={0.1} max={3} step={0.05} values={three(sel.scale)} onChange={(v) => patchSel({ scale: v }, 'scale')} />
@@ -705,13 +883,27 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
               </label>
               <label className="check"><input type="checkbox" checked={sel.followPath} onChange={(e) => patchSel({ followPath: e.target.checked })} /> Tilt to follow the path</label>
               <label className="check"><input type="checkbox" checked={sel.pinned} onChange={(e) => patchSel({ pinned: e.target.checked })} /> Pin to the viewport</label>
+              <Slider label="Parallax (depth drift)" min={-2} max={2} step={0.1} value={sel.parallax} onChange={(v) => patchSel({ parallax: v })} />
+              <label className="field">
+                <span>Follow another layer</span>
+                <select value={sel.attachTo ?? ''} onChange={(e) => patchSel({ attachTo: e.target.value || null })}>
+                  <option value="">No, use its own path</option>
+                  {scene.objects.filter((o) => o.id !== sel.id).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </select>
+              </label>
+              {sel.attachTo && (
+                <>
+                  <Slider label="Offset X (% of width)" min={-60} max={60} step={0.5} value={sel.offsetX} onChange={(v) => patchSel({ offsetX: v })} />
+                  <Slider label="Offset Y (% of height)" min={-60} max={60} step={0.5} value={sel.offsetY} onChange={(v) => patchSel({ offsetY: v })} />
+                </>
+              )}
 
               <h3>Motion path</h3>
               <div className="row">
-                <button type="button" className="btn small" onClick={addPoint} disabled={sel.pinned || sel.path.length >= 24}>Add point</button>
-                <button type="button" className="btn small ghost danger" onClick={removePoint} disabled={sel.pinned || sel.path.length <= 2}>Remove point {pointIdx + 1}</button>
+                <button type="button" className="btn small" onClick={addPoint} disabled={sel.pinned || !!sel.attachTo || sel.path.length >= 24}>Add point</button>
+                <button type="button" className="btn small ghost danger" onClick={removePoint} disabled={sel.pinned || !!sel.attachTo || sel.path.length <= 2}>Remove point {pointIdx + 1}</button>
               </div>
-              {sel.path[pointIdx] && !sel.pinned && (
+              {sel.path[pointIdx] && !sel.pinned && !sel.attachTo && (
                 <div className="row">
                   <label className="field half"><span>X %</span>
                     <input type="number" step={1} value={sel.path[pointIdx].x} onChange={(e) => setPath(sel.path.map((k, i) => (i === pointIdx ? { ...k, x: Number(e.target.value) } : k)), `path-${pointIdx}`)} />
@@ -728,6 +920,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
           <Slider label="Scroll length (px)" min={300} max={8000} step={50} value={scene.scroll.length} onChange={(v) => commit({ ...scene, scroll: { ...scene.scroll, length: v } }, 'scroll-length')} />
           <Slider label="Smoothing" min={0} max={1} step={0.05} value={scene.scroll.smoothing} onChange={(v) => commit({ ...scene, scroll: { ...scene.scroll, smoothing: v } }, 'smoothing')} />
           <label className="check"><input type="checkbox" checked={scene.scroll.reverse} onChange={(e) => commit({ ...scene, scroll: { ...scene.scroll, reverse: e.target.checked } })} /> Reverse when scrolling up</label>
+          </fieldset>
         </aside>
       </div>
 
@@ -766,11 +959,12 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
             id="prompt"
             type="text"
             maxLength={500}
+            disabled={readOnly}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="e.g. Make this bird flap its wings and fly along a curved path from the bottom-left to the top-right"
           />
-          <button type="submit" className="btn primary" disabled={!prompt.trim() || (job !== null && job.stage !== 'Failed' && job.stage !== 'Complete')}>Send</button>
+          <button type="submit" className="btn primary" disabled={readOnly || !prompt.trim() || (job !== null && job.stage !== 'Failed' && job.stage !== 'Complete')}>Send</button>
         </form>
         <p className="muted small-note">
           {projectId && mode !== 'free' && modeInfo
@@ -782,12 +976,36 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
   );
 }
 
+function EffectControls({ effect, onChange }: { effect: EffectSettings; onChange: (patch: Partial<EffectSettings>) => void }) {
+  return (
+    <fieldset className="triple">
+      <legend>{EFFECT_LABELS[effect.type]} settings</legend>
+      <Slider label="Particles" min={10} max={800} step={10} value={effect.count} onChange={(v) => onChange({ count: v })} />
+      <Slider label="Particle size" min={2} max={120} step={1} value={effect.size} onChange={(v) => onChange({ size: v })} />
+      <Slider label="Spread (% of width)" min={0} max={100} step={1} value={effect.spread} onChange={(v) => onChange({ spread: v })} />
+      <Slider label="Travel distance (% of height)" min={0} max={150} step={1} value={effect.rise} onChange={(v) => onChange({ rise: v })} />
+      <Slider label="Cycles over the scroll" min={0.5} max={30} step={0.5} value={effect.loops} onChange={(v) => onChange({ loops: v })} />
+      <label className="field"><span>Colour</span>
+        <input type="color" value={effect.color} onChange={(e) => onChange({ color: e.target.value })} aria-label="Particle colour" />
+      </label>
+      <label className="field"><span>Drawn</span>
+        <select value={effect.layer} onChange={(e) => onChange({ layer: e.target.value as 'back' | 'front' })}>
+          <option value="front">In front of images</option>
+          <option value="back">Behind images</option>
+        </select>
+      </label>
+      <button type="button" className="btn small ghost" onClick={() => onChange({ seed: Math.floor(Math.random() * 100000) })}>Shuffle pattern</button>
+    </fieldset>
+  );
+}
+
 function JobStatus({ job, onClose }: { job: NonNullable<Job>; onClose: () => void }) {
-  const idx = STAGES.indexOf(job.stage as Stage);
+  const list: Stage[] = job.stage === 'Generating image' || job.stage === 'Upscaling' ? ['Preparing image', job.stage, 'Optimising assets', 'Complete'] : STAGES;
+  const idx = list.indexOf(job.stage as Stage);
   return (
     <div className="job" role="status" aria-live="polite">
       <ol>
-        {STAGES.map((s, i) => (
+        {list.map((s, i) => (
           <li key={s} className={job.stage === 'Failed' ? '' : i < idx ? 'done' : i === idx ? 'now' : ''}>{s}</li>
         ))}
         {job.stage === 'Failed' && <li className="failed">Failed</li>}
