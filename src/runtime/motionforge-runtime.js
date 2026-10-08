@@ -294,7 +294,8 @@
     host.innerHTML = '';
     var track = document.createElement('div');
     track.className = 'mf-track';
-    track.style.cssText = 'position:relative;width:100%;';
+    // The animation must never intercept clicks meant for the page it is embedded in.
+    track.style.cssText = 'position:relative;width:100%;pointer-events:none;';
     var stage = document.createElement('div');
     stage.className = 'mf-stage';
     // 100dvh follows the visible area on phones, where the address bar comes and goes; 100vh is the fallback.
