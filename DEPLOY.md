@@ -44,14 +44,23 @@ Add these as variables (plain text) or secrets in the same place.
 
 Create two recurring prices in Stripe (Creator, Professional), then set secrets `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_CREATOR`, `STRIPE_PRICE_PROFESSIONAL`. Add a webhook endpoint `https://YOUR_DOMAIN/api/webhooks/stripe` for `checkout.session.completed`, `invoice.paid`, `customer.subscription.updated`, `customer.subscription.deleted`. Credits per plan are in `server/src/billing.ts`. Try Stripe test mode first.
 
-### Paid generation (Replicate)
+### Video from a still, and upscaling (Replicate)
 
-Pick an image-to-video model on replicate.com and copy its **version id**. Set `REPLICATE_FAST_VERSION` and/or `REPLICATE_PRO_VERSION` (variables) and `REPLICATE_API_TOKEN` (secret). If the model's image input is not called `image`, set `REPLICATE_IMAGE_FIELD`. Bring-your-own-key mode uses the Fast version with the user's own Replicate key.
+Create an account at replicate.com, add a payment method, and make an API token (Account → API tokens). Then:
+
+1. Add the token as a **secret** named `REPLICATE_API_TOKEN`. That is all you need: **Fast** mode then works using `bytedance/seedance-1-lite`, and **Upscale** uses `recraft-ai/recraft-crisp-upscale`.
+2. To choose other models, add **variables** (plain text) with a model name in the form `owner/name`: `REPLICATE_FAST_MODEL`, `REPLICATE_PRO_MODEL` (Professional mode stays off until you set this; `bytedance/seedance-1-pro` is a reasonable choice) and `REPLICATE_UPSCALE_MODEL`.
+
+You never need to look up version ids or input names. When a job starts, the app reads the model's own description from Replicate, finds which input takes the picture, picks the shortest clip length, and asks for a fixed camera where the model supports it. If a model cannot take an image, the job fails with a clear message and the credits are refunded. Replicate charges your account per run, so set the credit prices (`server/src/providers.ts`) above your cost.
+
+**Bring your own key** needs no token from you: people paste their own Replicate key in Settings and pay Replicate directly.
+
+These default model names are my suggestions from Replicate's published list. I could not run them (that needs your token), so try one video and one upscale after you add the token. Older setups that use `REPLICATE_FAST_VERSION`, `REPLICATE_PRO_VERSION` and `REPLICATE_UPSCALE_VERSION` keep working and take priority.
 
 ### Image generation and upscaling
 
 - Image generation (OpenAI): set `OPENAI_IMAGE_MODEL` to a model your account can use. Add `OPENAI_API_KEY` (secret) if credits should pay for it; leave it out to offer "use my own key" only. Set `OPENAI_IMAGE_TRANSPARENT=1` if the model supports transparent backgrounds.
-- Upscaling (Replicate): set `REPLICATE_UPSCALE_VERSION` (and `REPLICATE_UPSCALE_IMAGE_FIELD` / `REPLICATE_UPSCALE_SCALE_FIELD` if the model names its inputs differently). Uses `REPLICATE_API_TOKEN`, or the user's own key.
+- Upscaling: see the Replicate section above.
 
 ### Invitation emails (Resend)
 
