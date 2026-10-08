@@ -34,6 +34,14 @@ export async function charge(db: D1Database, userId: string, cost: number, reaso
   return row !== null;
 }
 
+/** Add credits at most once per ref (grants, subscription renewals). */
+export async function grantOnce(db: D1Database, userId: string, amount: number, reason: string, ref: string): Promise<void> {
+  await db
+    .prepare('INSERT OR IGNORE INTO ledger(user_id, delta, reason, ref, created_at) VALUES(?, ?, ?, ?, ?)')
+    .bind(userId, amount, reason, ref, now())
+    .run();
+}
+
 /** Refund at most once per ref. */
 export async function refund(db: D1Database, userId: string, amount: number, reason: string, ref: string): Promise<void> {
   if (amount === 0) return;
