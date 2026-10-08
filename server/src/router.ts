@@ -1,20 +1,23 @@
 import { clearCookie, createSession, getUser, login, logout, rateLimit, sessionCookie, signup, validateCredentials } from './auth';
-import { deleteAsset, getJobFile, listAssets, readAsset, readFrames, saveAsset, saveFrames, MAX_ASSET_BYTES, MAX_FRAMES_BYTES } from './assets';
+import { deleteAsset, getJobFile, listAssets, readAsset, readAssetRaw, readFramesRaw, saveAsset, saveFrames, MAX_ASSET_BYTES, MAX_FRAMES_BYTES, readFrames } from './assets';
 import { billingSummary, createCheckout, createPortal, handleStripeEvent, verifyStripeSignature } from './billing';
 import { balance, ensureMonthlyGrant } from './credits';
 import { HttpError, json, readJson } from './http';
-import { cancelJob, createJob, estimate, getJob, jobView, listJobs, retryJob, runJob } from './jobs';
+import { cancelJob, createJob, estimate, estimateTools, getJob, jobView, listJobs, retryJob, runJob } from './jobs';
 import { listKeys, removeKey, saveKey, testKey } from './keys';
 import { createProject, deleteProject, getProject, listExports, listProjects, listVersions, logExport, restoreVersion, updateProject } from './projects';
 import { defaultProviders } from './providers';
-import type { ProviderRegistry } from './providers';
-import { providersFromEnv } from './replicate';
+import type { ProviderRegistry, Registry, ToolRegistry } from './providers';
+import { providersFromEnv, toolsFromEnv } from './replicate';
 import { createShare, getShared, listShares, revokeShare } from './shares';
+import { acceptInvite, createTeam, deleteTeam, getTeam, inviteMember, listTeams, previewInvite, removeMember, revokeInvite, setMemberRole } from './teams';
+import { projectAccess } from './access';
 import type { Env, UserRow } from './types';
 
 export interface Deps {
-  /** Overrides the registry (tests). By default it is built from the environment. */
+  /** Override the registries (tests). By default they are built from the environment. */
   providers?: ProviderRegistry;
+  tools?: ToolRegistry;
   fetchFn: typeof fetch;
 }
 
@@ -24,7 +27,10 @@ export interface Ctx {
 
 const defaults: Deps = { fetchFn: (...a) => fetch(...a) };
 
-export const resolveProviders = (env: Env, deps: Deps): ProviderRegistry => deps.providers ?? providersFromEnv(env, deps.fetchFn, defaultProviders);
+export const resolveRegistry = (env: Env, deps: Deps): Registry => ({
+  modes: deps.providers ?? providersFromEnv(env, deps.fetchFn, defaultProviders),
+  tools: deps.tools ?? toolsFromEnv(env, deps.fetchFn),
+});
 
 function secure(res: Response): Response {
   res.headers.set('x-content-type-options', 'nosniff');
@@ -58,7 +64,7 @@ async function route(req: Request, env: Env, deps: Deps, ctx?: Ctx): Promise<Res
   const path = url.pathname;
   const method = req.method;
   const db = env.DB;
-  const providers = resolveProviders(env, deps);
+  const reg = resolveRegistry(env, deps);
   const ip = req.headers.get('cf-connecting-ip') ?? 'local';
 
   if (!path.startsWith('/api/')) throw new HttpError(404, 'Not found.');
@@ -88,13 +94,20 @@ async function route(req: Request, env: Env, deps: Deps, ctx?: Ctx): Promise<Res
     const shared = await getShared(env, m[1]);
     if (!m[2]) return json(shared.view);
     if (m[3]) {
-      const frames = await readFrames(env, shared.ownerId, shared.projectId, m[2]);
+      const frames = await readFramesRaw(env, shared.ownerId, shared.projectId, m[2]);
       if (!frames) throw new HttpError(404, 'No frames.');
       return bin(new TextEncoder().encode(frames), 'application/json');
     }
-    const a = await readAsset(env, shared.ownerId, shared.projectId, m[2]);
+    const a = await readAssetRaw(env, shared.ownerId, shared.projectId, m[2]);
     if (!a) throw new HttpError(404, 'Image not found.');
     return bin(a.bytes, a.type);
+  }
+
+  // What an invitation is for, shown before the person signs in.
+  m = path.match(/^\/api\/invites\/([A-Za-z0-9_-]{16,64})$/);
+  if (m && method === 'GET') {
+    await rateLimit(db, `invite:${ip}`, 60, 60);
+    return json(await previewInvite(db, m[1]));
   }
 
   if (path === '/api/auth/signup' && method === 'POST') {
@@ -155,11 +168,47 @@ async function route(req: Request, env: Env, deps: Deps, ctx?: Ctx): Promise<Res
     }
   }
 
+  // --- teams ---
+  if (path === '/api/teams' && method === 'GET') return json({ teams: await listTeams(db, user.id) });
+  if (path === '/api/teams' && method === 'POST') return json({ team: await createTeam(db, user, (await readJson(req)).name) }, 201);
+  m = path.match(/^\/api\/teams\/([0-9a-f-]{36})(?:\/(invites|members)(?:\/([A-Za-z0-9_-]+))?)?$/);
+  if (m) {
+    const [, teamId, kind, sub] = m;
+    if (!kind) {
+      if (method === 'GET') return json({ team: await getTeam(db, user.id, teamId) });
+      if (method === 'DELETE') {
+        await deleteTeam(db, user.id, teamId);
+        return json({ ok: true });
+      }
+    } else if (kind === 'invites') {
+      if (method === 'POST' && !sub) {
+        await rateLimit(db, `invite-create:${user.id}`, 30, 3600);
+        const b = await readJson(req);
+        return json(await inviteMember(db, user.id, teamId, b.email, b.role), 201);
+      }
+      if (method === 'DELETE' && sub) {
+        await revokeInvite(db, user.id, teamId, sub);
+        return json({ ok: true });
+      }
+    } else if (kind === 'members' && sub) {
+      if (method === 'PUT') {
+        await setMemberRole(db, user.id, teamId, sub, (await readJson(req)).role);
+        return json({ ok: true });
+      }
+      if (method === 'DELETE') {
+        await removeMember(db, user.id, teamId, sub);
+        return json({ ok: true });
+      }
+    }
+  }
+  m = path.match(/^\/api\/invites\/([A-Za-z0-9_-]{16,64})\/accept$/);
+  if (m && method === 'POST') return json(await acceptInvite(db, user, m[1]));
+
   // --- projects ---
   if (path === '/api/projects' && method === 'GET') return json({ projects: await listProjects(db, user.id) });
   if (path === '/api/projects' && method === 'POST') {
     const b = await readJson(req);
-    return json({ project: await createProject(db, user.id, b.name, b.scene) }, 201);
+    return json({ project: await createProject(db, user.id, b.name, b.scene, b.teamId) }, 201);
   }
   m = path.match(/^\/api\/projects\/([0-9a-f-]{36})(?:\/(versions|exports|assets|shares)(?:\/([A-Za-z0-9_-]+))?(?:\/(restore|frames))?)?$/);
   if (m) {
@@ -169,7 +218,7 @@ async function route(req: Request, env: Env, deps: Deps, ctx?: Ctx): Promise<Res
       if (method === 'GET') return json({ project: await getProject(db, user.id, id) });
       if (method === 'PUT') {
         const b = await readJson(req);
-        return json({ project: await updateProject(db, user.id, id, { name: b.name, scene: b.scene }) });
+        return json({ project: await updateProject(db, user.id, id, { name: b.name, scene: b.scene, teamId: b.teamId }) });
       }
       if (method === 'DELETE') {
         await deleteProject(db, user.id, id);
@@ -191,7 +240,7 @@ async function route(req: Request, env: Env, deps: Deps, ctx?: Ctx): Promise<Res
         return json(await createShare(env, user.id, id), 201);
       }
       if (method === 'DELETE' && sub) {
-        await revokeShare(env, user.id, sub);
+        await revokeShare(env, user.id, id, sub);
         return json({ ok: true });
       }
     } else if (kind === 'assets') {
@@ -229,11 +278,15 @@ async function route(req: Request, env: Env, deps: Deps, ctx?: Ctx): Promise<Res
 
   // --- generation ---
   if (path === '/api/estimate' && method === 'GET') {
-    const e = estimate(url.searchParams.get('mode') ?? '', providers);
+    const e = estimate(url.searchParams.get('mode') ?? '', reg.modes);
     return json({ ...e, balance: await balance(db, user.id) });
   }
   if (path === '/api/modes' && method === 'GET') {
-    return json({ modes: (['free', 'fast', 'professional', 'byok'] as const).map((mode) => estimate(mode, providers)), balance: await balance(db, user.id) });
+    return json({
+      modes: (['free', 'fast', 'professional', 'byok'] as const).map((mode) => estimate(mode, reg.modes)),
+      tools: estimateTools(reg),
+      balance: await balance(db, user.id),
+    });
   }
   if (path === '/api/jobs' && method === 'GET') {
     const projectId = url.searchParams.get('projectId');
@@ -242,8 +295,8 @@ async function route(req: Request, env: Env, deps: Deps, ctx?: Ctx): Promise<Res
   }
   if (path === '/api/jobs' && method === 'POST') {
     await rateLimit(db, `jobs:${user.id}`, 30, 3600);
-    const { job, created } = await createJob(db, env, providers, user.id, await readJson(req));
-    if (created) ctx?.waitUntil(runJob(db, env, providers, job.id));
+    const { job, created } = await createJob(db, env, reg, user.id, await readJson(req));
+    if (created) ctx?.waitUntil(runJob(db, env, reg, job.id));
     return json({ job: jobView(job), credits: await balance(db, user.id) }, created ? 202 : 200);
   }
   m = path.match(/^\/api\/jobs\/([0-9a-f-]{36})(?:\/(retry|cancel|video))?$/);
@@ -251,14 +304,15 @@ async function route(req: Request, env: Env, deps: Deps, ctx?: Ctx): Promise<Res
     const id = m[1];
     if (!m[2] && method === 'GET') return json({ job: jobView(await getJob(db, user.id, id)) });
     if (m[2] === 'video' && method === 'GET') {
-      await getJob(db, user.id, id);
+      const job = await getJob(db, user.id, id);
+      await projectAccess(db, user.id, job.project_id, 'read');
       const v = await getJobFile(env, id, 'video.mp4');
       if (!v) throw new HttpError(404, 'No video.');
       return bin(v.bytes, v.type);
     }
     if (m[2] === 'retry' && method === 'POST') {
       await retryJob(db, user.id, id);
-      ctx?.waitUntil(runJob(db, env, providers, id));
+      ctx?.waitUntil(runJob(db, env, reg, id));
       return json({ job: jobView(await getJob(db, user.id, id)) }, 202);
     }
     if (m[2] === 'cancel' && method === 'POST') {
