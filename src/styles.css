@@ -138,6 +138,33 @@ summary { cursor: pointer; font-weight: 600; }
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid; place-items: center; z-index: 20; padding: 16px; }
 .modal-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px; width: min(520px, 100%); max-height: 90vh; overflow: auto; }
 
+.art { width: 100%; height: auto; border-radius: 8px; }
+.art-bg { fill: #1b2231; }
+.a-wing, .a-body { fill: #8ab4ff; }
+.a-wing { transform-box: fill-box; animation: a-flap .5s ease-in-out infinite alternate; }
+.a-wing-l { transform-origin: 100% 100%; }
+.a-wing-r { transform-origin: 0 100%; animation-name: a-flap-r; }
+.a-fly { animation: a-fly 4s ease-in-out infinite alternate; }
+.a-spin { fill: #8ab4ff; transform-box: fill-box; transform-origin: center; animation: a-spin 3s linear infinite; }
+.a-balloon { fill: #ff8a8a; }
+.a-string { stroke: #cfd6df; stroke-width: 1; }
+.a-float { animation: a-float 3.5s ease-in-out infinite alternate; }
+.a-sweep { fill: #8ab4ff; animation: a-sweep 3s cubic-bezier(.6,0,.3,1) infinite alternate; }
+.a-rocket { fill: #e6edf5; }
+.a-launch { animation: a-launch 3s ease-in infinite; }
+.a-flame { fill: #ffb02e; animation: a-flicker .25s ease-in-out infinite alternate; }
+.a-flame-2 { fill: #ff4d1f; }
+.a-snow { fill: #fff; animation: a-snow 3.5s linear infinite; }
+@keyframes a-flap { to { transform: rotate(-28deg) scaleY(.7); } }
+@keyframes a-flap-r { to { transform: rotate(28deg) scaleY(.7); } }
+@keyframes a-fly { from { transform: translate(-30px, 12px) rotate(-6deg); } to { transform: translate(30px, -12px) rotate(4deg); } }
+@keyframes a-spin { to { transform: rotate(360deg) scale(1.15); } }
+@keyframes a-float { from { transform: translate(-8px, 12px); } to { transform: translate(8px, -14px); } }
+@keyframes a-sweep { to { transform: translateX(100px) scale(1.3); } }
+@keyframes a-launch { from { transform: translateY(20px); } to { transform: translateY(-80px); } }
+@keyframes a-flicker { to { transform: scale(1.5); opacity: .6; } }
+@keyframes a-snow { from { transform: translateY(-4px); } to { transform: translateY(96px); } }
+@media (prefers-reduced-motion: reduce) { .art * { animation: none !important; } }
 .plain-list { margin: 0; padding-left: 1.1em; color: var(--muted); font-size: .9rem; }
 .cards li ul.plain-list li { display: list-item; }
 .badge { margin-left: 8px; font-size: .72rem; font-weight: 600; color: var(--accent); border: 1px solid var(--border); border-radius: 999px; padding: .1em .6em; }
