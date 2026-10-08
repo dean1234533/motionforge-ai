@@ -138,6 +138,11 @@ summary { cursor: pointer; font-weight: 600; }
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid; place-items: center; z-index: 20; padding: 16px; }
 .modal-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px; width: min(520px, 100%); max-height: 90vh; overflow: auto; }
 
+.badge { margin-left: 8px; font-size: .72rem; font-weight: 600; color: var(--accent); border: 1px solid var(--border); border-radius: 999px; padding: .1em .6em; }
+.card-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px; margin: 20px 0; }
+fieldset.plain { border: 0; margin: 0; padding: 0; min-width: 0; }
+.banner.info { background: #1f2a44; color: #d6e2ff; }
+
 /* export */
 .export { min-height: 100vh; }
 .export-grid { display: grid; grid-template-columns: minmax(300px, 420px) minmax(0, 1fr); gap: 24px; padding: 24px; }
