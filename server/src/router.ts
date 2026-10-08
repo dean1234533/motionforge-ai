@@ -12,6 +12,7 @@ import { providersFromEnv, toolsFromEnv } from './replicate';
 import { createShare, getShared, listShares, revokeShare } from './shares';
 import { acceptInvite, createTeam, deleteTeam, getTeam, inviteMember, listTeams, previewInvite, removeMember, revokeInvite, setMemberRole } from './teams';
 import { projectAccess } from './access';
+import { sendMail } from './mail';
 import type { Env, UserRow } from './types';
 
 export interface Deps {
@@ -184,7 +185,14 @@ async function route(req: Request, env: Env, deps: Deps, ctx?: Ctx): Promise<Res
       if (method === 'POST' && !sub) {
         await rateLimit(db, `invite-create:${user.id}`, 30, 3600);
         const b = await readJson(req);
-        return json(await inviteMember(db, user.id, teamId, b.email, b.role), 201);
+        return json(
+          await inviteMember(db, user.id, teamId, b.email, b.role, {
+            inviterEmail: user.email,
+            appUrl: env.APP_URL,
+            send: (mail) => sendMail(env, deps.fetchFn, mail),
+          }),
+          201,
+        );
       }
       if (method === 'DELETE' && sub) {
         await revokeInvite(db, user.id, teamId, sub);
