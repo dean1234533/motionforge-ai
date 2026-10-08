@@ -29,6 +29,17 @@ Bring-your-own-key mode uses the Fast version with the user's own Replicate key.
 
 A cron trigger (every minute) resumes jobs that are waiting on Replicate.
 
+## Optional: image generation and upscaling
+
+- **Image generation** (OpenAI images API): set the variable `OPENAI_IMAGE_MODEL` to a model name your account can use. Set the secret `OPENAI_API_KEY` if you want credits to pay for it; leave it out to offer "use my own key" only. Set `OPENAI_IMAGE_TRANSPARENT=1` if the model supports `background: "transparent"`; otherwise images are requested on a white background and cleaned up in the browser.
+- **Upscaling** (Replicate): set `REPLICATE_UPSCALE_VERSION` to an upscaling model version id (and `REPLICATE_UPSCALE_IMAGE_FIELD` / `REPLICATE_UPSCALE_SCALE_FIELD` if the model names its inputs differently). Uses `REPLICATE_API_TOKEN` for credits, or the user's own Replicate key.
+
+Costs in credits are in `server/src/providers.ts` (`TOOLS`, `MODES`).
+
+## Teams
+
+Creating a team needs the Professional plan (set by a successful Stripe checkout). Invitations are links the owner sends; the server does not send email.
+
 ## Local development
 
 `npx wrangler dev --config server/wrangler.jsonc` (API on :8787) and `npm run dev` (front-end on :5173, proxies `/api`).
