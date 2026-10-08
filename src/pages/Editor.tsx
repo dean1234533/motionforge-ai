@@ -889,8 +889,9 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
 
       <div className="ed-main">
         <aside className="panel left" aria-label="Assets and layers">
-          <fieldset disabled={readOnly} className="plain">
+          {/* the tabs sit outside the disabled fieldset so people with view-only access can still look around */}
           <TabBar label="Editing tools" tabs={LEFT_TABS} value={leftTab} onChange={setLeftTab} />
+          <fieldset disabled={readOnly} className="plain">
           <div role="tabpanel" aria-label={LEFT_TABS.find((t) => t.id === leftTab)?.label}>
           {leftTab === 'media' && (<>
           <h2>Images</h2>
@@ -1016,9 +1017,9 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
         </main>
 
         <aside className="panel right" aria-label="Properties">
-          <fieldset disabled={readOnly} className="plain">
           <h2>Properties</h2>
           <TabBar label="Property sections" tabs={RIGHT_TABS} value={rightTab} onChange={setRightTab} />
+          <fieldset disabled={readOnly} className="plain">
           <div role="tabpanel" aria-label={RIGHT_TABS.find((t) => t.id === rightTab)?.label}>
           {!sel && rightTab !== 'scroll' && <p className="muted">Select a layer to edit it.</p>}
           {sel && (
