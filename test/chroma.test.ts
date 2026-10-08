@@ -16,10 +16,11 @@ describe('chroma key', () => {
   });
 
   it('removes green spill from edge pixels', () => {
-    const data = buf(px(180, 200, 170));
+    const data = buf(px(150, 200, 140));
     keyImageData(data, 'green');
     expect(data[3]).toBeGreaterThan(0);
-    expect(data[1]).toBeLessThanOrEqual(180); // green capped at the strongest other channel
+    expect(data[3]).toBeLessThan(255);
+    expect(data[1]).toBeLessThanOrEqual(150); // green capped at the strongest other channel
   });
 
   it('works with a blue screen', () => {
