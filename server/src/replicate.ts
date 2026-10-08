@@ -1,5 +1,6 @@
 import { PendingError, localRulesProvider } from './providers';
-import type { ProviderRegistry, ServerProvider } from './providers';
+import { openaiImageProvider } from './openaiImage';
+import type { ProviderRegistry, ServerProvider, ToolRegistry } from './providers';
 import type { Env } from './types';
 
 export interface ReplicateConfig {
@@ -39,6 +40,7 @@ export function replicateProvider(cfg: ReplicateConfig): ServerProvider {
     id: `replicate:${cfg.version.slice(0, 8)}`,
     keyProviders: ['replicate'],
     needsImage: true,
+    platformKey: Boolean(cfg.token),
     async step(stage, ctx) {
       if (stage === 'Analysing prompt') return localRulesProvider.step(stage, ctx);
 
@@ -87,6 +89,81 @@ export function replicateProvider(cfg: ReplicateConfig): ServerProvider {
       }
     },
   };
+}
+
+export interface UpscaleConfig {
+  version: string;
+  token?: string;
+  imageField: string;
+  scaleField: string;
+  fetchFn: typeof fetch;
+}
+
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+/** Enlarges one of the project's images. The result is saved as a new, high-resolution image. */
+export function replicateUpscaleProvider(cfg: UpscaleConfig): ServerProvider {
+  return {
+    id: `replicate:${cfg.version.slice(0, 8)}`,
+    keyProviders: ['replicate'],
+    needsImage: true,
+    platformKey: Boolean(cfg.token),
+    async step(stage, ctx) {
+      if (stage !== 'Upscaling') return;
+      const token = ctx.apiKey ?? cfg.token;
+      if (!token) throw new Error('No API key is available for this provider.');
+      const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+
+      if (typeof ctx.state.predictionId !== 'string') {
+        if (!ctx.input.assetId) throw new Error('Choose an image to upscale.');
+        const asset = await ctx.assets.read(ctx.input.assetId);
+        if (!asset) throw new Error('The source image could not be found.');
+        const res = await cfg.fetchFn(`${API}/predictions`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ version: cfg.version, input: { [cfg.imageField]: toDataUri(asset.bytes, asset.type), [cfg.scaleField]: ctx.input.scale ?? 2 } }),
+          signal: AbortSignal.timeout(30_000),
+        });
+        if (!res.ok) throw new Error(res.status === 401 || res.status === 403 ? 'The provider rejected the API key.' : `The provider could not start the job (${res.status}).`);
+        const created = (await res.json()) as { id?: string };
+        if (!created.id) throw new Error('The provider did not return a job id.');
+        throw new PendingError({ predictionId: created.id });
+      }
+
+      const res = await cfg.fetchFn(`${API}/predictions/${encodeURIComponent(ctx.state.predictionId)}`, { headers, signal: AbortSignal.timeout(30_000) });
+      if (!res.ok) throw new Error(`The provider could not report progress (${res.status}).`);
+      const p = (await res.json()) as { status?: string; output?: unknown };
+      if (p.status === 'failed' || p.status === 'canceled') throw new Error(`Upscaling ${p.status}.`);
+      if (p.status !== 'succeeded') throw new PendingError();
+      const out = Array.isArray(p.output) ? p.output[0] : p.output;
+      if (typeof out !== 'string' || !trustedVideoHost(out)) throw new Error('The provider returned an unexpected result.');
+      const img = await cfg.fetchFn(out, { signal: AbortSignal.timeout(60_000) });
+      if (!img.ok) throw new Error('The enlarged image could not be downloaded.');
+      const bytes = new Uint8Array(await img.arrayBuffer());
+      if (bytes.length === 0 || bytes.length > MAX_IMAGE_BYTES) throw new Error('The enlarged image is larger than the 5 MB limit. Try 2x instead of 4x.');
+      const id = `up-${crypto.randomUUID().slice(0, 8)}`;
+      const base = (ctx.input.sourceName ?? 'image').replace(/\.[^.]+$/, '');
+      await ctx.assets.saveAsset(id, `${base}-hd.png`, bytes, true);
+      return { assetId: id };
+    },
+  };
+}
+
+export function toolsFromEnv(env: Env, fetchFn: typeof fetch): ToolRegistry {
+  const tools: ToolRegistry = {};
+  if (env.OPENAI_IMAGE_MODEL) {
+    tools['image-gen'] = openaiImageProvider({ model: env.OPENAI_IMAGE_MODEL, token: env.OPENAI_API_KEY, transparent: env.OPENAI_IMAGE_TRANSPARENT === '1', fetchFn });
+  }
+  if (env.REPLICATE_UPSCALE_VERSION) {
+    tools.upscale = replicateUpscaleProvider({
+      version: env.REPLICATE_UPSCALE_VERSION,
+      token: env.REPLICATE_API_TOKEN,
+      imageField: env.REPLICATE_UPSCALE_IMAGE_FIELD ?? 'image',
+      scaleField: env.REPLICATE_UPSCALE_SCALE_FIELD ?? 'scale',
+      fetchFn,
+    });
+  }
+  return tools;
 }
 
 /** Which paid modes exist depends on what the operator has configured. */
