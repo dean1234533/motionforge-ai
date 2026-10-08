@@ -23,6 +23,7 @@ const PROVIDERS = [
 export function Settings() {
   const [keys, setKeys] = useState<KeyInfo[] | null>(null);
   const [modes, setModes] = useState<ModeInfo[]>([]);
+  const [setup, setSetup] = useState<Record<string, boolean> | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
@@ -30,7 +31,9 @@ export function Settings() {
   const load = async () => {
     try {
       setKeys((await api<{ keys: KeyInfo[] }>('GET', '/api/keys')).keys);
-      setModes((await api<{ modes: ModeInfo[] }>('GET', '/api/modes')).modes);
+      const m = await api<{ modes: ModeInfo[]; setup?: Record<string, boolean> }>('GET', '/api/modes');
+      setModes(m.modes);
+      setSetup(m.setup ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load settings.');
     }
@@ -117,6 +120,27 @@ export function Settings() {
           ))}
         </tbody>
       </table>
+      {setup && (
+        <>
+          <h2>Server setup</h2>
+          <p className="muted">What this server can see right now (yes or no only; values are never shown). Settings must be added in Cloudflare under the Worker's own <b>Settings → Variables and Secrets</b>, then redeployed. The “Build” section's variables are not visible to the running site.</p>
+          <table>
+            <thead><tr><th scope="col">Setting</th><th scope="col">Found</th><th scope="col">What it enables</th></tr></thead>
+            <tbody>
+              {[
+                ['KEY_ENCRYPTION_SECRET', setup.encryptionSecret, 'Saving API keys (Settings above, bring-your-own-key)'],
+                ['AI (Cloudflare Workers AI)', setup.ai, 'Understanding prompts and “Create with AI” images'],
+                ['REPLICATE_API_TOKEN', setup.replicateToken, 'Fast mode (video from a still) and paid upscaling'],
+                ['REPLICATE_PRO_MODEL', setup.proModel, 'Professional mode'],
+                ['Stripe settings', setup.stripe, 'Paid plans'],
+                ['Email (RESEND_API_KEY, MAIL_FROM)', setup.email, 'Emailed team invitations'],
+              ].map(([name, found, what]) => (
+                <tr key={String(name)}><th scope="row">{name}</th><td>{found ? 'Yes' : 'No'}</td><td>{what}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
       <p className="muted small-note">App version {__BUILD_ID__}</p>
     </div>
   );
