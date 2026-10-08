@@ -27,6 +27,9 @@ async function visiblePixels(page: Page) {
 
 test('account -> project -> upload -> autosave -> reload -> share -> settings -> billing', async ({ page, browser }) => {
   page.on('pageerror', (e) => console.log('[page error]', e.message, e.stack));
+  // The server has Cloudflare AI bound, so describing a movement is a (confirmed) paid job. When the AI cannot be
+  // reached, as it cannot from a test machine, the server falls back to the rule-based planner.
+  page.on('dialog', (d) => void d.accept());
   const email = `e2e-${Date.now()}@example.com`;
 
   // sign up
