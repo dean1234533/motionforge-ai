@@ -454,7 +454,9 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
       say('ai', 'Upload an image or use the sample bird first, then describe how it should move.');
       return;
     }
-    if (projectId && mode !== 'free') {
+    // Server jobs are used for the paid modes, and for "free" when the server has an AI that understands prompts.
+    const serverFree = serverModes.find((m) => m.mode === 'free');
+    if (projectId && (mode !== 'free' || (serverFree && serverFree.provider !== 'local-rules'))) {
       await runPaid(text, sel);
       return;
     }
@@ -577,21 +579,27 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     if (!window.confirm(`This will use ${cost} with ${modeInfo.provider}. Continue?`)) return;
     try {
       // Video models cannot make transparent video, so the subject is filmed on a flat colour screen
-      // and that colour is keyed out of every frame afterwards.
-      setJob({ stage: 'Preparing image' });
-      const source = assets.find((a) => a.id === target.assetId)?.source;
-      if (!source) throw new Error('That layer has no image to animate.');
-      const screen = await chromaScreenBlob(source);
-      const screenId = `gs-${target.assetId}`.slice(0, 40);
-      await uploadBinary(`/api/projects/${projectId}/assets/${screenId}?name=chroma-screen.png`, screen.blob);
-      chroma.current = { id: screenId, key: screen.key };
+      // and that colour is keyed out of every frame afterwards. Planning-only jobs need none of that.
+      let prompt = text;
+      let jobAsset: string | undefined;
+      if (mode !== 'free') {
+        setJob({ stage: 'Preparing image' });
+        const source = assets.find((a) => a.id === target.assetId)?.source;
+        if (!source) throw new Error('That layer has no image to animate.');
+        const screen = await chromaScreenBlob(source);
+        const screenId = `gs-${target.assetId}`.slice(0, 40);
+        await uploadBinary(`/api/projects/${projectId}/assets/${screenId}?name=chroma-screen.png`, screen.blob);
+        chroma.current = { id: screenId, key: screen.key };
+        prompt = `${text}. The subject stays centred on a flat, bright ${screen.key} background with a static camera.`;
+        jobAsset = screenId;
+      }
       setJob({ stage: 'Analysing prompt' });
       const created = await api<{ job: ServerJob; credits: number }>('POST', '/api/jobs', {
         projectId,
         mode,
-        prompt: `${text}. The subject stays centred on a flat, bright ${screen.key} background with a static camera.`,
+        prompt,
         idempotencyKey: crypto.randomUUID(),
-        assetId: screenId,
+        assetId: jobAsset,
         keyProvider,
       });
       session.setCredits(created.credits);
@@ -849,7 +857,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
                             Generate image · {payWithKey || !t.platformKey ? 'your key' : `${t.cost} credits`}
                           </button>
                         </div>
-                        {t.platformKey && (
+                        {t.platformKey && t.keyProvider && (
                           <label className="check"><input type="checkbox" checked={payWithKey} onChange={(e) => setPayWithKey(e.target.checked)} /> Use my own {t.keyProvider} key instead of credits</label>
                         )}
                       </>
