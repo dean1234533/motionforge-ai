@@ -1,53 +1,57 @@
 # Deploying MotionForge AI
 
-Everything runs on Cloudflare: a Worker (API + cron), D1 (database), R2 (image storage) and static assets for the front-end, all on one origin. The free mode works with none of this; deploy only when you want accounts, saved projects, sharing, billing and paid generation.
+Everything runs on Cloudflare as one Worker: it serves the website and the API, stores data in D1 (database) and R2 (images), and a cron trigger resumes slow AI jobs. The Free mode works with none of this; deploy when you want accounts, saved projects, sharing, teams, billing and paid generation.
 
-## One-time setup (Cloudflare dashboard or `npx wrangler`)
+## The simple way: Workers Builds (connect the GitHub repo)
 
-1. `npx wrangler d1 create motionforge` and paste the `database_id` into `server/wrangler.jsonc`.
-2. `npx wrangler r2 bucket create motionforge-files`.
-3. In `server/wrangler.jsonc` set `APP_URL` and `ALLOWED_ORIGIN` to your public URL (for example `https://motionforge.example.com`, no trailing slash).
-4. Set the encryption secret (required; losing it makes stored API keys unreadable):
-   `openssl rand -base64 32 | npx wrangler secret put KEY_ENCRYPTION_SECRET --config server/wrangler.jsonc`
-5. In GitHub: Settings -> Secrets -> Actions, add `CLOUDFLARE_API_TOKEN` (Workers, D1 and R2 edit permissions) and `CLOUDFLARE_ACCOUNT_ID`.
-6. Actions tab -> **Deploy** -> Run workflow. It tests, builds, applies migrations and deploys.
+In the Cloudflare dashboard: **Workers & Pages > Create > Import a repository**, pick this repo, and use:
 
-## Optional: paid plans (Stripe)
+| Setting | Value |
+| --- | --- |
+| Build command | `npm run build` |
+| Deploy command | `npx wrangler deploy` |
+| Root directory | (leave empty) |
 
-Create two recurring prices in Stripe (Creator, Professional), then set secrets
-`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_CREATOR`, `STRIPE_PRICE_PROFESSIONAL`.
-Add a webhook endpoint `https://YOUR_DOMAIN/api/webhooks/stripe` for the events
-`checkout.session.completed`, `invoice.paid`, `customer.subscription.updated`, `customer.subscription.deleted`.
-Credits per plan are defined in `server/src/billing.ts` (`PLANS`). Test in Stripe test mode first.
+The repo's [wrangler.jsonc](wrangler.jsonc) tells Wrangler what to create. On the first deploy it **creates the D1 database and R2 bucket for you**, and the Worker **creates its own tables** the first time it runs. There is no separate migration step.
 
-## Optional: paid generation (Replicate)
+Then add one secret (**Settings > Variables and Secrets**):
 
-Pick an image-to-video model on replicate.com and copy its **version id**.
-Set the variables `REPLICATE_FAST_VERSION` and/or `REPLICATE_PRO_VERSION` (plain vars in `wrangler.jsonc`) and the secret `REPLICATE_API_TOKEN`.
-If the model's image input is not called `image`, set `REPLICATE_IMAGE_FIELD`.
-Bring-your-own-key mode uses the Fast version with the user's own Replicate key.
+- `KEY_ENCRYPTION_SECRET` — generate with `openssl rand -base64 32`. It encrypts users' saved API keys. Keep a copy; if you lose it, saved keys become unreadable. Without it, everything else works but saving API keys is switched off.
 
-A cron trigger (every minute) resumes jobs that are waiting on Replicate.
+Open the site, sign up, and you are running. Everything below is optional.
 
-## Optional: image generation and upscaling
+## Optional settings
 
-- **Image generation** (OpenAI images API): set the variable `OPENAI_IMAGE_MODEL` to a model name your account can use. Set the secret `OPENAI_API_KEY` if you want credits to pay for it; leave it out to offer "use my own key" only. Set `OPENAI_IMAGE_TRANSPARENT=1` if the model supports `background: "transparent"`; otherwise images are requested on a white background and cleaned up in the browser.
-- **Upscaling** (Replicate): set `REPLICATE_UPSCALE_VERSION` to an upscaling model version id (and `REPLICATE_UPSCALE_IMAGE_FIELD` / `REPLICATE_UPSCALE_SCALE_FIELD` if the model names its inputs differently). Uses `REPLICATE_API_TOKEN` for credits, or the user's own Replicate key.
+Add these as variables (plain text) or secrets in the same place.
 
-Costs in credits are in `server/src/providers.ts` (`TOOLS`, `MODES`).
+- `ALLOWED_ORIGIN` — your site's address with no trailing slash, e.g. `https://motionforge-ai.yourname.workers.dev`. Extra protection that rejects requests from other sites.
+- `APP_URL` — the same address. Defaults to the address the site is served from, which is right for most setups.
 
-## Optional: invitation emails
+### Paid plans (Stripe)
 
-Set the secret `RESEND_API_KEY` (from resend.com) and the variable `MAIL_FROM`, for example `MotionForge <team@yourdomain.com>` (the domain must be verified in Resend). `APP_URL` must also be set. Without these, owners copy the invitation link and send it themselves.
+Create two recurring prices in Stripe (Creator, Professional), then set secrets `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_CREATOR`, `STRIPE_PRICE_PROFESSIONAL`. Add a webhook endpoint `https://YOUR_DOMAIN/api/webhooks/stripe` for `checkout.session.completed`, `invoice.paid`, `customer.subscription.updated`, `customer.subscription.deleted`. Credits per plan are in `server/src/billing.ts`. Try Stripe test mode first.
 
-## Teams
+### Paid generation (Replicate)
 
-Creating a team needs the Professional plan (set by a successful Stripe checkout). Invitation links are tied to one email address and expire after 7 days.
+Pick an image-to-video model on replicate.com and copy its **version id**. Set `REPLICATE_FAST_VERSION` and/or `REPLICATE_PRO_VERSION` (variables) and `REPLICATE_API_TOKEN` (secret). If the model's image input is not called `image`, set `REPLICATE_IMAGE_FIELD`. Bring-your-own-key mode uses the Fast version with the user's own Replicate key.
 
-## Plans
+### Image generation and upscaling
 
-Project limits and the feature lists shown on the Billing page are in `server/src/plans.ts`; credits per plan are in `server/src/billing.ts`. Exports made on a Free plan (or with no account) carry a small badge that links back to the editor; the licence text for exports is in `src/export/build.ts`. Review that wording before you launch.
+- Image generation (OpenAI): set `OPENAI_IMAGE_MODEL` to a model your account can use. Add `OPENAI_API_KEY` (secret) if credits should pay for it; leave it out to offer "use my own key" only. Set `OPENAI_IMAGE_TRANSPARENT=1` if the model supports transparent backgrounds.
+- Upscaling (Replicate): set `REPLICATE_UPSCALE_VERSION` (and `REPLICATE_UPSCALE_IMAGE_FIELD` / `REPLICATE_UPSCALE_SCALE_FIELD` if the model names its inputs differently). Uses `REPLICATE_API_TOKEN`, or the user's own key.
+
+### Invitation emails (Resend)
+
+Set secret `RESEND_API_KEY` and variable `MAIL_FROM`, e.g. `MotionForge <team@yourdomain.com>` (verify the domain in Resend). Without these, team owners copy the invitation link and send it themselves.
+
+### Plans
+
+Project limits and feature lists are in `server/src/plans.ts`; credits per plan in `server/src/billing.ts`. Free exports carry a small badge; the licence wording is in `src/export/build.ts`. Review that wording before launch.
+
+## Deploying from GitHub Actions instead
+
+Add repository secrets `CLOUDFLARE_API_TOKEN` (Workers, D1 and R2 edit permissions) and `CLOUDFLARE_ACCOUNT_ID`, then run the **Deploy** workflow from the Actions tab.
 
 ## Local development
 
-`npx wrangler dev --config server/wrangler.jsonc` (API on :8787) and `npm run dev` (front-end on :5173, proxies `/api`).
+`npx wrangler dev --local` (API and site on :8787), or `npm run dev` (front-end on :5173, proxies `/api` to :8787).
