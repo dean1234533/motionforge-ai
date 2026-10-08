@@ -1,12 +1,19 @@
 name: Deploy
 # Deploys the Worker to Cloudflare from GitHub. It only runs when you start it by hand (Actions tab > Deploy > Run workflow),
-# so nothing changes on your live site unless you ask. Leave "ref" empty for the newest code, or give a commit to put an
-# older version live. Needs the repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.
+# so nothing changes on your live site unless you ask.
+#   ref     = which commit's website to build (empty = newest on main)
+#   overlay = paths copied from the newest main on top of that commit (for example "server wrangler.jsonc"),
+#             so you can keep an older front end and still get newer back-end fixes.
+# Needs the repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.
 on:
   workflow_dispatch:
     inputs:
       ref:
         description: Commit to deploy (empty = the newest code on main)
+        required: false
+        default: ''
+      overlay:
+        description: Paths to copy from the newest main on top of that commit (empty = none)
         required: false
         default: ''
 jobs:
@@ -22,14 +29,23 @@ jobs:
         if: steps.secrets.outputs.present == 'true'
         with:
           ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         if: steps.secrets.outputs.present == 'true'
         with:
           node-version: 22
+      - name: Copy newer files on top
+        if: steps.secrets.outputs.present == 'true' && inputs.overlay != ''
+        run: |
+          git fetch origin main
+          git checkout origin/main -- ${{ inputs.overlay }}
+          git status --short | head -50
       - if: steps.secrets.outputs.present == 'true'
         run: npm install
-      - if: steps.secrets.outputs.present == 'true'
-        run: npm run build
+      - name: Build
+        if: steps.secrets.outputs.present == 'true'
+        run: |
+          if [ -n "${{ inputs.overlay }}" ]; then npx vite build; else npm run build; fi
       - name: Deploy
         if: steps.secrets.outputs.present == 'true'
         run: |
