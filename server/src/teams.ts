@@ -64,8 +64,18 @@ export async function getTeam(db: D1Database, userId: string, teamId: string) {
   return { ...team!, role, members, invites };
 }
 
-/** Creates a single-use link. Email delivery is not wired up, so the owner shares the link themselves. */
-export async function inviteMember(db: D1Database, userId: string, teamId: string, emailInput: unknown, role: unknown) {
+export interface InviteMailer {
+  inviterEmail: string;
+  /** Public base URL of the app, e.g. https://motionforge.example.com. */
+  appUrl: string | undefined;
+  send: (mail: { to: string; subject: string; text: string }) => Promise<boolean>;
+}
+
+/**
+ * Creates a single-use link and emails it when mail is configured. Either way the link is returned,
+ * so the owner can also share it by hand.
+ */
+export async function inviteMember(db: D1Database, userId: string, teamId: string, emailInput: unknown, role: unknown, mailer?: InviteMailer) {
   await requireOwner(db, userId, teamId);
   const email = typeof emailInput === 'string' ? emailInput.trim().toLowerCase() : '';
   if (!EMAIL.test(email) || email.length > 254) throw new HttpError(400, 'Enter a valid email address.');
@@ -80,7 +90,20 @@ export async function inviteMember(db: D1Database, userId: string, teamId: strin
     .prepare('INSERT INTO team_invites(token, team_id, email, role, invited_by, created_at, expires_at) VALUES(?, ?, ?, ?, ?, ?, ?)')
     .bind(token, teamId, email, role, userId, now(), now() + INVITE_SECONDS)
     .run();
-  return { token };
+  let emailed = false;
+  if (mailer?.appUrl) {
+    const team = await db.prepare('SELECT name FROM teams WHERE id = ?').bind(teamId).first<{ name: string }>();
+    const link = `${mailer.appUrl.replace(/\/$/, '')}/#/invite/${token}`;
+    emailed = await mailer.send({
+      to: email,
+      subject: `${mailer.inviterEmail} invited you to ${team?.name ?? 'a team'} on MotionForge`,
+      text:
+        `${mailer.inviterEmail} invited you to join the team "${team?.name ?? ''}" on MotionForge as ${role === 'editor' ? 'an editor' : 'a viewer'}.\n\n` +
+        `Open this link while signed in with this email address (${email}) to accept:\n${link}\n\n` +
+        `The link expires in 7 days. If you were not expecting this, you can ignore this email.`,
+    });
+  }
+  return { token, emailed };
 }
 
 export async function revokeInvite(db: D1Database, userId: string, teamId: string, token: string) {
