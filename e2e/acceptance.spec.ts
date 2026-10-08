@@ -33,7 +33,7 @@ async function scrollTo(page: Page, f: number) {
   await page.waitForTimeout(1800);
 }
 
-test('upload -> prompt -> edit path -> export -> exported file works without the editor', async ({ page, context }) => {
+test('upload -> prompt -> edit path -> export -> exported file works without the editor', async ({ page, context }, testInfo) => {
   page.on('console', (m) => { if (m.type() === 'error') console.log('[browser error]', m.text()); });
   page.on('pageerror', (e) => console.log('[page error]', e.message));
   await page.goto('/#/editor');
@@ -72,7 +72,9 @@ test('upload -> prompt -> edit path -> export -> exported file works without the
     page.waitForEvent('download', { timeout: 20_000 }),
     page.getByRole('button', { name: 'Download standalone HTML' }).click(),
   ]);
-  const file = await download.path();
+  const file = testInfo.outputPath(download.suggestedFilename());
+  await download.saveAs(file);
+  expect(file.endsWith('.html')).toBe(true);
 
   // 8. open the exported file on its own (file://, no dev server, no editor)
   const exported = await context.newPage();
