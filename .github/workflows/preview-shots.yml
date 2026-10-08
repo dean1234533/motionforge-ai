@@ -1,0 +1,50 @@
+name: Preview shots
+# Builds the newest code and photographs the editor, WITHOUT deploying anything.
+on:
+  workflow_dispatch:
+jobs:
+  shots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium >/dev/null
+      - name: Photograph the editor
+        run: |
+          mkdir shots
+          (npx vite preview --port 4173 >/dev/null 2>&1 &)
+          sleep 4
+          cat > shot.mjs <<'JS'
+          import { chromium, devices } from '@playwright/test';
+          const b = await chromium.launch();
+          for (const [name, opts] of [['desktop', { viewport: { width: 1280, height: 800 } }], ['phone', { ...devices['Pixel 5'] }]]) {
+            const ctx = await b.newContext(opts);
+            const page = await ctx.newPage();
+            await page.goto('http://localhost:4173/#/editor');
+            await page.getByRole('button', { name: 'Use sample bird' }).click();
+            await page.waitForSelector('.frame iframe');
+            await page.waitForTimeout(2000);
+            await page.getByRole('tab', { name: 'Layers', exact: true }).click();
+            await page.getByRole('tab', { name: 'Timing', exact: true }).click();
+            await page.screenshot({ path: `shots/${name}-1-timing.png` });
+            await page.getByRole('tab', { name: 'Add', exact: true }).click();
+            await page.getByRole('tab', { name: 'Look', exact: true }).click();
+            await page.screenshot({ path: `shots/${name}-2-add-look.png` });
+            if (name === 'phone') {
+              await page.getByRole('heading', { name: 'Properties' }).scrollIntoViewIfNeeded();
+              await page.screenshot({ path: `shots/${name}-3-panels.png` });
+            }
+            await ctx.close();
+          }
+          await b.close();
+          JS
+          cp shot.mjs shot.run.mjs && node shot.run.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots
+          path: shots
