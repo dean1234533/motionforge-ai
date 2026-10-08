@@ -1,11 +1,23 @@
 import { sanitizeText } from '../lib/sanitize';
+import { newEffect } from '../scene/defaults';
 import { parseScene } from '../scene/schema';
-import type { Scene, SceneObject } from '../scene/schema';
+import type { EffectSettings, EffectType, Scene, SceneObject } from '../scene/schema';
 
 export interface EditResult {
   scene: Scene;
   message: string;
+  /** Work the editor must do on the server (it needs an image provider), then place the result. */
+  action?: { type: 'generate-image'; prompt: string; behind: boolean };
 }
+
+const EFFECT_WORDS: { re: RegExp; type: EffectType; settings?: Partial<EffectSettings>; global?: boolean }[] = [
+  { re: /\b(smoke|steam|exhaust)\b/, type: 'smoke' },
+  { re: /\b(fire|flames?|flaming|blaze)\b/, type: 'fire' },
+  { re: /\b(water|splash|fountain)\b/, type: 'water' },
+  { re: /\b(sparkles?|sparks|glitter)\b/, type: 'sparkle' },
+  { re: /\b(rain|raindrops?)\b/, type: 'snow', global: true, settings: { color: '#9ec9ff', size: 5, loops: 10, count: 220 } },
+  { re: /\b(snow|snowfall|snowflakes?)\b/, type: 'snow', global: true },
+];
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 const r1 = (n: number) => Math.round(n * 10) / 10;
@@ -37,12 +49,31 @@ export function applyEditCommand(prompt: string, scene: Scene, targetId: string 
     objects = objects.map((o) => (ids.has(o.id) ? fn(o) : o));
   };
 
-  if (/\b(add|insert|put)\b.*\b(clouds?|trees?|sun|moon|birds?|stars?|background)\b/.test(t)) {
-    return {
-      scene,
-      message:
-        'Adding new generated objects needs an AI image provider, which runs on the server and is not part of this version. Upload the image you want as a new layer instead.',
-    };
+  if (/\b(add|insert|put|give|include)\b/.test(t)) {
+    const fx = EFFECT_WORDS.find((f) => f.re.test(t));
+    if (fx) {
+      if (scene.objects.length >= 20) return { scene, message: 'This scene already has the maximum number of layers.' };
+      const effect = newEffect(`${fx.type}-${Math.random().toString(36).slice(2, 6)}`, fx.type, fx.global ? null : targetId);
+      if (fx.settings) effect.effect = { ...effect.effect!, ...fx.settings };
+      if (/\bbehind\b/.test(t)) effect.effect = { ...effect.effect!, layer: 'back' };
+      const next = parseScene({ ...scene, objects: [...scene.objects, effect] });
+      if (!next.ok) return { scene, message: `That change would make the scene invalid (${next.error}).` };
+      const follows = effect.attachTo ? ' It follows the selected layer.' : '';
+      return { scene: next.scene, message: `Added ${fx.type === 'snow' && fx.settings ? 'rain' : fx.type}.${follows} Adjust it in the properties panel.` };
+    }
+    const thing = /\b(clouds?|trees?|sun|moon|birds?|stars?|mountains?|hills?|buildings?|city|background|grass|flowers?)\b/.exec(t);
+    if (thing) {
+      const phrase = /\badd\s+(?:some\s+|a\s+|an\s+|the\s+)?(.+?)(?:\s+(?:behind|in front|to|around|near|beside)\b.*)?$/.exec(t)?.[1] ?? thing[1];
+      return {
+        scene,
+        message: `Creating new artwork needs an image provider. If this server has one (or you connected your own key), I will generate “${phrase}” for you.`,
+        action: { type: 'generate-image', prompt: `soft ${phrase}`.slice(0, 200), behind: /\bbehind\b/.test(t) || !/\bin front\b/.test(t) },
+      };
+    }
+  }
+  if (/\b(parallax|more depth|add depth)\b/.test(t)) {
+    edit((o) => ({ ...o, parallax: 0.6 }));
+    notes.push('Added parallax, so this layer drifts against the scroll.');
   }
 
   const wings = /\b(wings?|flap\w*)\b/.test(t);
