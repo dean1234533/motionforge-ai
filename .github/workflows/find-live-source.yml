@@ -1,5 +1,5 @@
 name: Find live source
-# Builds the website from several past commits and prints each build's file names, so the one that matches the live site can be found.
+# Builds the website from past commits and prints each build's file names, so the one that matches the live site can be found.
 on:
   workflow_dispatch:
 jobs:
@@ -10,21 +10,31 @@ jobs:
       matrix:
         sha:
           - 6eb999b92af7ff52d83b4456cd34f1fb3b73f610
-          - 83d77adccfc98e76292057dd8e0346dc3f300aad
-          - a6f8a74bdeabee2bd84eff7c1833551dd8bb82ae
-          - d844b4950a5bc9fecd1fd315efdbd791e2ad03fa
-          - 39ee4bd4f5062bf027cd7605eaf8aba72fb59437
-          - 8b4d22c7f629649b42cd8ca1ee2d23661b303cb6
-          - 0db220fa026b34625f909af6fc4e2ecf6681e70d
+          - c801094e40ae747740f98e981a54b6930df16384
+          - e239d7dec4b34a67ea860791a2ae8a0e4c237f3f
+          - a31f053229029dd03a9d0514ffc8897c7726defc
+          - bb757b1f7d0bbb27bbe70e6383ab4ee9c31e6852
+          - 83a068de47c8cbd46d719f76a4673b1a31c33ccf
+          - 943d19f54605bdf5b779c27eefddd9ed125fda65
+          - d3cb2c7651f56ee3d81524e8cf7a9de493bb3d2b
+          - 32684d59cc229dab1195c14fe46eef9031b26369
+          - 61ba47e55c70ac6d235804a18c3ea4ed0a6ff367
           - a7b2059022d575d6e2af734727218d6a5204bb15
+          - 0db220fa026b34625f909af6fc4e2ecf6681e70d
+          - 8b4d22c7f629649b42cd8ca1ee2d23661b303cb6
+          - 39ee4bd4f5062bf027cd7605eaf8aba72fb59437
+          - d844b4950a5bc9fecd1fd315efdbd791e2ad03fa
+          - a6f8a74bdeabee2bd84eff7c1833551dd8bb82ae
+          - 83d77adccfc98e76292057dd8e0346dc3f300aad
+          - 336d35f1a24598702be941e5185abeb9da1eff4f
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: git checkout ${{ matrix.sha }} || git checkout $(git rev-parse ${{ matrix.sha }})
+      - run: git checkout ${{ matrix.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: npm install >/dev/null 2>&1
-      - run: npx vite build 2>&1 | grep -E "dist/assets|error" 
+      - run: npm install
+      - run: npx vite build
       - run: echo "RESULT ${{ matrix.sha }} => $(ls dist/assets | tr '\n' ' ')"
