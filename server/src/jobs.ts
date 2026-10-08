@@ -90,7 +90,7 @@ export async function createJob(db: D1Database, env: Env, providers: ProviderReg
   if (!provider) throw new HttpError(501, `${MODES[m].label} mode is not available yet.`);
 
   let assetId: string | undefined;
-  if (m !== 'free') {
+  if (provider.needsImage) {
     assetId = typeof body.assetId === 'string' ? body.assetId : undefined;
     const asset = assetId ? await db.prepare('SELECT asset_id FROM assets WHERE project_id = ? AND asset_id = ? AND user_id = ?').bind(body.projectId, assetId, userId).first() : null;
     if (!asset) throw new HttpError(400, 'Choose one of this project\'s images to animate.');
