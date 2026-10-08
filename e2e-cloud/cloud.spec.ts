@@ -54,7 +54,8 @@ test('account -> project -> upload -> autosave -> reload -> share -> settings ->
   await page.locator('#prompt').fill('Make this bird flap its wings and fly along a curved path from the bottom-left to the top-right as the user scrolls.');
   await page.getByRole('button', { name: 'Send' }).click();
   await expect(page.getByText('Planned a curved path', { exact: false })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole('status').filter({ hasText: 'Saved' })).toBeVisible({ timeout: 15_000 });
+  // wait for the server to confirm the save of the planned path (not just for the "Saved" label)
+  await page.waitForResponse((r) => r.request().method() === 'PUT' && /\/api\/projects\/[0-9a-f-]{36}$/.test(r.url()) && r.request().postData()?.includes('"progress":0.25') === true, { timeout: 15_000 });
 
   // paid modes are honestly unavailable on a server with no providers configured
   await expect(page.locator('select[aria-label="Generation mode"] option[value="fast"]')).toHaveAttribute('disabled', '');
