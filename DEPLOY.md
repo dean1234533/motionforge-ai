@@ -22,6 +22,17 @@ Then add one secret (**Settings > Variables and Secrets**):
 
 Open the site, sign up, and you are running. Everything below is optional.
 
+## AI that needs no setup (Cloudflare Workers AI)
+
+`wrangler.jsonc` binds Cloudflare's own AI, so these work as soon as you deploy, with no account or key to add:
+
+- **Understanding what you type.** For signed-in users in Free mode, a language model turns the sentence into movement numbers. Every number is range-checked, and if the AI errors or answers badly the rule-based planner is used instead. Costs 2 credits per prompt.
+- **Create with AI.** Describe an image and FLUX (`flux-1-schnell`) makes it, added as a new layer. Costs 4 credits. The image has a white background, which the editor removes.
+
+Usage is billed to *your* Cloudflare account (there is a daily free allowance; see Cloudflare's Workers AI pricing). Users pay you in credits, so set credit prices with that in mind. If you would rather use OpenAI for image generation, set `OPENAI_IMAGE_MODEL` (below) and it takes over.
+
+Cloudflare's AI does not do video, background removal or upscaling. For video from a still, and for upscaling, add Replicate (below).
+
 ## Optional settings
 
 Add these as variables (plain text) or secrets in the same place.
