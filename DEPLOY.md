@@ -1,6 +1,6 @@
 # Deploying MotionForge AI
 
-Everything runs on Cloudflare as one Worker: it serves the website and the API, stores data in D1 (database) and R2 (images), and a cron trigger resumes slow AI jobs. The Free mode works with none of this; deploy when you want accounts, saved projects, sharing, teams, billing and paid generation.
+Everything runs on Cloudflare as one Worker: it serves the website and the API, stores data and images in D1 (database), and a cron trigger resumes slow AI jobs. The Free mode works with none of this; deploy when you want accounts, saved projects, sharing, teams, billing and paid generation.
 
 ## The simple way: Workers Builds (connect the GitHub repo)
 
@@ -12,9 +12,9 @@ In the Cloudflare dashboard: **Workers & Pages > Create > Import a repository**,
 | Deploy command | `npx wrangler deploy` |
 | Root directory | (leave empty) |
 
-The repo's [wrangler.jsonc](wrangler.jsonc) tells Wrangler what to create. On the first deploy it **creates the D1 database and R2 bucket for you**, and the Worker **creates its own tables** the first time it runs. There is no separate migration step.
+The repo's [wrangler.jsonc](wrangler.jsonc) tells Wrangler what to create. On the first deploy it **creates the D1 database for you**, and the Worker **creates its own tables** the first time it runs. There is no separate migration step and no storage to set up: uploaded images are kept in the database.
 
-If your Cloudflare account has never used R2, you may need to switch it on once first (**R2 Object Storage** in the dashboard; it asks you to accept terms and may ask for a payment method, though the free allowance is generous). If a deploy ever fails with an R2 error, that is the first thing to check. As a manual alternative, create a bucket yourself, then change the line in `wrangler.jsonc` to `{ "binding": "FILES", "bucket_name": "your-bucket-name" }`.
+Optional: to keep images in an R2 bucket instead (better for large amounts of data), create a bucket in the dashboard (**R2 Object Storage**) and add `"r2_buckets": [{ "binding": "FILES", "bucket_name": "your-bucket-name" }]` to `wrangler.jsonc`. New uploads then go to R2; existing ones stay in the database.
 
 Then add one secret (**Settings > Variables and Secrets**):
 
