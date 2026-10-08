@@ -1,10 +1,28 @@
 {
-  "name": "motionforge-api",
+  "name": "motionforge",
   "main": "src/index.ts",
   "compatibility_date": "2025-01-01",
+  // The built front-end (npm run build -> dist/) is served from the same origin as the API.
+  "assets": {
+    "directory": "../dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
   "d1_databases": [
     { "binding": "DB", "database_name": "motionforge", "database_id": "REPLACE_WITH_YOUR_D1_ID", "migrations_dir": "migrations" }
   ],
-  "vars": { "ALLOWED_ORIGIN": "https://REPLACE_WITH_YOUR_DOMAIN" }
-  // Secrets (never commit): npx wrangler secret put KEY_ENCRYPTION_SECRET   (base64, 32 random bytes)
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "motionforge-files" }],
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": {
+    "APP_URL": "https://REPLACE_WITH_YOUR_DOMAIN",
+    "ALLOWED_ORIGIN": "https://REPLACE_WITH_YOUR_DOMAIN"
+    // Optional (enable the paid modes):
+    // "REPLICATE_FAST_VERSION": "<replicate model version id>",
+    // "REPLICATE_PRO_VERSION": "<replicate model version id>",
+    // "REPLICATE_IMAGE_FIELD": "image"
+  }
+  // Secrets (never commit these): wrangler secret put <NAME>
+  //   KEY_ENCRYPTION_SECRET   base64 of 32 random bytes:  openssl rand -base64 32
+  //   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_CREATOR, STRIPE_PRICE_PROFESSIONAL
+  //   REPLICATE_API_TOKEN
 }
