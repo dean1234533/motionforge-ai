@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { buildAsset } from '../ai/imagePipeline';
-import { readFileAsDataUrl } from '../ai/imagePipeline';
+import { buildAsset, readFileAsDataUrl } from '../ai/imagePipeline';
 import { parseScene } from '../scene/schema';
 
 interface SharedView {
