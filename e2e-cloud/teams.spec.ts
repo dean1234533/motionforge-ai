@@ -76,7 +76,11 @@ test('teams: owner invites a viewer, the viewer gets a read-only team project', 
   await expect(viewer.getByText('Team: Studio')).toBeVisible();
   await viewer.getByRole('link', { name: 'Open' }).click();
   await expect(viewer.getByText('view-only access', { exact: false })).toBeVisible({ timeout: 30_000 });
+  // view-only people can still switch tabs and look, but not edit
+  await expect(viewer.getByRole('tab', { name: 'Layers', exact: true })).toBeEnabled({ timeout: 60_000 });
+  await viewer.getByRole('tab', { name: 'Layers', exact: true }).click();
   await expect(viewer.getByRole('button', { name: /^sample-bird/ })).toBeVisible({ timeout: 60_000 });
+  await viewer.getByRole('tab', { name: 'Media', exact: true }).click();
   await expect(viewer.getByRole('button', { name: 'Upload image' })).toBeDisabled();
   await expect(viewer.locator('#prompt')).toBeDisabled();
 
