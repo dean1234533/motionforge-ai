@@ -54,7 +54,7 @@ test('account -> project -> upload -> autosave -> reload -> share -> settings ->
   await expect(page.getByRole('status').filter({ hasText: 'Saved' })).toBeVisible({ timeout: 15_000 });
 
   // paid modes are honestly unavailable on a server with no providers configured
-  await expect(page.locator('select[aria-label="Generation mode"] option[value="fast"]')).toBeDisabled();
+  await expect(page.locator('select[aria-label="Generation mode"] option[value="fast"]')).toHaveAttribute('disabled', '');
 
   // reload: everything comes back from the server
   await page.reload();
