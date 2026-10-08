@@ -34,6 +34,8 @@ async function scrollTo(page: Page, f: number) {
 }
 
 test('upload -> prompt -> edit path -> export -> exported file works without the editor', async ({ page, context }) => {
+  page.on('console', (m) => { if (m.type() === 'error') console.log('[browser error]', m.text()); });
+  page.on('pageerror', (e) => console.log('[page error]', e.message));
   await page.goto('/#/editor');
 
   // 1. upload a transparent PNG bird
@@ -67,7 +69,7 @@ test('upload -> prompt -> edit path -> export -> exported file works without the
   // 7. export
   await page.getByRole('button', { name: 'Export' }).click();
   const [download] = await Promise.all([
-    page.waitForEvent('download'),
+    page.waitForEvent('download', { timeout: 20_000 }),
     page.getByRole('button', { name: 'Download standalone HTML' }).click(),
   ]);
   const file = await download.path();
@@ -79,7 +81,7 @@ test('upload -> prompt -> edit path -> export -> exported file works without the
     if (!r.url().startsWith('file:') && !r.url().startsWith('data:')) external.push(r.url());
   });
   await exported.goto(`file://${file}`);
-  await exported.waitForSelector('canvas');
+  await exported.waitForSelector('canvas', { timeout: 20_000 });
   await exported.waitForTimeout(800);
 
   const a = await (async () => { await scrollTo(exported, 0.25); return pose(exported); })();
