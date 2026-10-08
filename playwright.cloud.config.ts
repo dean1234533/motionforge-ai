@@ -1,4 +1,4 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig, devices } from '@playwright/test';
 
 // Runs the real Worker (API + D1 + R2 + static front-end) locally through wrangler, using the same
 // wrangler.jsonc that gets deployed. The Worker creates its own tables on the first request.
@@ -15,5 +15,8 @@ export default defineConfig({
     timeout: 180_000,
     reuseExistingServer: false,
   },
-  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
+  projects: [
+    { name: 'chromium', use: { browserName: 'chromium' }, testIgnore: /mobile\.spec/ },
+    { name: 'mobile', use: { ...devices['Pixel 5'] }, testMatch: /mobile\.spec/ },
+  ],
 });
