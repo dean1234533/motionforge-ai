@@ -20,7 +20,7 @@ describe('assets', () => {
     expect((await raw('PUT', `${base}?name=${encodeURIComponent('../my bird<1>.png')}`, PNG, u.cookie, 'image/png')).status).toBe(201);
 
     const list = await call('GET', `/api/projects/${projectId}/assets`, undefined, u.cookie);
-    expect(list.body.assets).toEqual([{ id: 'bird-1', name: 'my-bird1.png', mime: 'image/png', bytes: PNG.length, hasFrames: false }]);
+    expect(list.body.assets).toEqual([{ id: 'bird-1', name: 'my-bird1.png', mime: 'image/png', bytes: PNG.length, hasFrames: false, hd: false }]);
 
     const got = await call('GET', base, undefined, u.cookie);
     expect(got.headers.get('content-type')).toBe('image/png');
@@ -75,7 +75,7 @@ describe('sharing', () => {
     const pub = await call('GET', `/api/share/${token}`);
     expect(pub.status).toBe(200);
     expect(pub.body.scene.objects).toHaveLength(1);
-    expect(pub.body.assets).toEqual([{ id: 'a1', hasFrames: true }]);
+    expect(pub.body.assets).toEqual([{ id: 'a1', hasFrames: true, hd: false }]);
     expect(pub.text).not.toMatch(/user\d|@example|"userId"/);
 
     expect((await call('GET', `/api/share/${token}/assets/a1`)).bytes.length).toBe(PNG.length);
