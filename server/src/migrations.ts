@@ -157,4 +157,16 @@ export const MIGRATIONS: Migration[] = [
       `ALTER TABLE jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'motion'`,
     ],
   },
+  {
+    id: '0004_file_chunks',
+    statements: [
+      `CREATE TABLE file_chunks (
+  key TEXT NOT NULL,
+  idx INTEGER NOT NULL,
+  type TEXT,
+  data TEXT NOT NULL,
+  PRIMARY KEY (key, idx)
+)`,
+    ],
+  },
 ];
