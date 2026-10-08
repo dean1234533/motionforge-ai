@@ -7,6 +7,8 @@ interface ProjectSummary {
   name: string;
   objects: number;
   updatedAt: number;
+  teamId: string | null;
+  teamName: string | null;
 }
 
 export function Dashboard() {
@@ -53,7 +55,7 @@ export function Dashboard() {
       <ul className="cards">
         {projects?.map((p) => (
           <li key={p.id}>
-            <b>{p.name}</b>
+            <b>{p.name}{p.teamName ? <span className="badge">Team: {p.teamName}</span> : null}</b>
             <span>{p.objects} layer{p.objects === 1 ? '' : 's'} · edited {when(p.updatedAt)}</span>
             <div className="row">
               <a className="btn small" href={`#/editor/${p.id}`}>Open</a>
