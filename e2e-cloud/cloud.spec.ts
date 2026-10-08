@@ -71,6 +71,7 @@ test('account -> project -> upload -> autosave -> reload -> share -> settings ->
 
   // reload: everything comes back from the server
   await page.reload();
+  await page.getByRole('tab', { name: 'Layers', exact: true }).click();
   await expect(page.getByRole('button', { name: /^bird/ })).toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole('button', { name: /Path point 3 of 5/ })).toBeVisible();
 
