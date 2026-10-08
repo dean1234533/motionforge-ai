@@ -1,10 +1,11 @@
 import { sanitizeText } from '../../src/lib/sanitize';
-import { putJobFile, readAsset } from './assets';
+import { projectAccess } from './access';
+import { putJobFile, readAssetRaw, saveAsset } from './assets';
 import { balance, charge, ensureMonthlyGrant, refund } from './credits';
 import { HttpError } from './http';
 import { readKey } from './keys';
-import { MODES, PendingError, STAGES } from './providers';
-import type { Mode, ProviderRegistry } from './providers';
+import { MODES, PendingError, TOOLS, stagesFor } from './providers';
+import type { JobKind, Mode, ProviderRegistry, Registry, ServerProvider } from './providers';
 import type { D1Database, Env } from './types';
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -13,6 +14,7 @@ export interface JobRow {
   id: string;
   user_id: string;
   project_id: string;
+  kind: JobKind;
   mode: Mode;
   status: 'queued' | 'running' | 'complete' | 'failed' | 'cancelled';
   stage: string;
@@ -24,20 +26,25 @@ export interface JobRow {
   attempts: number;
 }
 
-const COLUMNS = 'id, user_id, project_id, mode, status, stage, stage_done, error, cost, input, state, attempts';
+const COLUMNS = 'id, user_id, project_id, kind, mode, status, stage, stage_done, error, cost, input, state, attempts';
+const KINDS: JobKind[] = ['motion', 'image-gen', 'upscale'];
 
 export const jobView = (j: JobRow) => {
   const state = JSON.parse(j.state) as Record<string, unknown>;
   return {
     id: j.id,
     projectId: j.project_id,
+    kind: j.kind,
     mode: j.mode,
     status: j.status,
     stage: j.status === 'failed' ? 'Failed' : j.stage,
     error: j.error,
     cost: j.cost,
     attempts: j.attempts,
-    result: j.status === 'complete' ? { plan: state.plan ?? null, videoUrl: state.video ? `/api/jobs/${j.id}/video` : null } : null,
+    result:
+      j.status === 'complete'
+        ? { plan: state.plan ?? null, videoUrl: state.video ? `/api/jobs/${j.id}/video` : null, assetId: (state.assetId as string | undefined) ?? null }
+        : null,
   };
 };
 
@@ -55,6 +62,23 @@ export function estimate(mode: string, providers: ProviderRegistry) {
   };
 }
 
+export function estimateTools(reg: Registry) {
+  return (['image-gen', 'upscale'] as const).map((kind) => {
+    const p = reg.tools[kind];
+    return {
+      kind,
+      label: TOOLS[kind].label,
+      cost: TOOLS[kind].cost,
+      ownKeyCost: 0,
+      provider: p?.id ?? null,
+      keyProvider: p?.keyProviders?.[0] ?? null,
+      available: Boolean(p),
+      /** True when credits can pay for it (the server holds a key). Otherwise only "your own key" works. */
+      platformKey: Boolean(p?.platformKey),
+    };
+  });
+}
+
 export async function getJob(db: D1Database, userId: string, id: string): Promise<JobRow> {
   const j = await db.prepare(`SELECT ${COLUMNS} FROM jobs WHERE id = ? AND user_id = ?`).bind(id, userId).first<JobRow>();
   if (!j) throw new HttpError(404, 'Job not found.');
@@ -62,6 +86,7 @@ export async function getJob(db: D1Database, userId: string, id: string): Promis
 }
 
 export async function listJobs(db: D1Database, userId: string, projectId: string) {
+  await projectAccess(db, userId, projectId, 'read');
   const { results } = await db
     .prepare(`SELECT ${COLUMNS} FROM jobs WHERE user_id = ? AND project_id = ? ORDER BY created_at DESC LIMIT 50`)
     .bind(userId, projectId)
@@ -69,55 +94,78 @@ export async function listJobs(db: D1Database, userId: string, projectId: string
   return results.map(jobView);
 }
 
-export async function createJob(db: D1Database, env: Env, providers: ProviderRegistry, userId: string, body: Record<string, unknown>) {
-  const mode = body.mode;
-  if (typeof mode !== 'string' || !Object.hasOwn(MODES, mode)) throw new HttpError(400, 'Choose a generation mode.');
+export async function createJob(db: D1Database, env: Env, reg: Registry, userId: string, body: Record<string, unknown>) {
+  const kind = (body.kind ?? 'motion') as JobKind;
+  if (!KINDS.includes(kind)) throw new HttpError(400, 'Unknown job type.');
   const idem = body.idempotencyKey;
   if (typeof idem !== 'string' || idem.length < 8 || idem.length > 80) throw new HttpError(400, 'An idempotencyKey of 8 to 80 characters is required.');
-  const prompt = typeof body.prompt === 'string' ? sanitizeText(body.prompt) : '';
-  if (!prompt) throw new HttpError(400, 'Describe the animation.');
   if (typeof body.projectId !== 'string') throw new HttpError(400, 'projectId is required.');
+  const promptRaw = typeof body.prompt === 'string' ? sanitizeText(body.prompt) : '';
+  if (!promptRaw && kind !== 'upscale') throw new HttpError(400, 'Describe what you want.');
+  const prompt = promptRaw || 'upscale';
 
   // Same key from the same user returns the same job, never a second charge.
   const existing = await db.prepare(`SELECT ${COLUMNS} FROM jobs WHERE user_id = ? AND idempotency_key = ?`).bind(userId, idem).first<JobRow>();
   if (existing) return { job: existing, created: false };
 
-  const project = await db.prepare('SELECT id FROM projects WHERE id = ? AND user_id = ?').bind(body.projectId, userId).first();
-  if (!project) throw new HttpError(404, 'Project not found.');
+  await projectAccess(db, userId, body.projectId, 'write');
 
-  const m = mode as Mode;
-  const provider = providers[m];
-  if (!provider) throw new HttpError(501, `${MODES[m].label} mode is not available yet.`);
+  // Work out which provider, label and price this job uses.
+  let provider: ServerProvider | undefined;
+  let mode: Mode = 'free';
+  let label: string;
+  let cost: number;
+  let useOwnKey = false;
+  if (kind === 'motion') {
+    if (typeof body.mode !== 'string' || !Object.hasOwn(MODES, body.mode)) throw new HttpError(400, 'Choose a generation mode.');
+    mode = body.mode as Mode;
+    provider = reg.modes[mode];
+    label = MODES[mode].label;
+    cost = MODES[mode].cost;
+    useOwnKey = mode === 'byok';
+  } else {
+    provider = reg.tools[kind];
+    label = TOOLS[kind].label;
+    useOwnKey = body.useOwnKey === true;
+    cost = useOwnKey ? 0 : TOOLS[kind].cost;
+    if (useOwnKey) mode = 'byok';
+  }
+  if (!provider) throw new HttpError(501, `${label} is not available yet.`);
+  if (!useOwnKey && kind !== 'motion' && !provider.platformKey) {
+    throw new HttpError(400, `${label} is not paid for by this server. Connect your own key in Settings and choose “use my own key”.`);
+  }
 
   let assetId: string | undefined;
+  let sourceName: string | undefined;
   if (provider.needsImage) {
     assetId = typeof body.assetId === 'string' ? body.assetId : undefined;
-    const asset = assetId ? await db.prepare('SELECT asset_id FROM assets WHERE project_id = ? AND asset_id = ? AND user_id = ?').bind(body.projectId, assetId, userId).first() : null;
-    if (!asset) throw new HttpError(400, 'Choose one of this project\'s images to animate.');
+    const asset = assetId ? await db.prepare('SELECT name FROM assets WHERE project_id = ? AND asset_id = ?').bind(body.projectId, assetId).first<{ name: string }>() : null;
+    if (!asset) throw new HttpError(400, 'Choose one of this project\'s images.');
+    sourceName = asset.name;
   }
 
   let keyProvider: string | undefined;
-  if (m === 'byok') {
-    keyProvider = typeof body.keyProvider === 'string' ? body.keyProvider : undefined;
+  if (useOwnKey) {
+    keyProvider = typeof body.keyProvider === 'string' ? body.keyProvider : provider.keyProviders?.[0];
     if (!keyProvider || (provider.keyProviders && !provider.keyProviders.includes(keyProvider))) {
-      throw new HttpError(400, `This mode works with: ${(provider.keyProviders ?? ['a saved key']).join(', ')}.`);
+      throw new HttpError(400, `This works with: ${(provider.keyProviders ?? ['a saved key']).join(', ')}.`);
     }
     if (!(await readKey(db, env.KEY_ENCRYPTION_SECRET, userId, keyProvider))) throw new HttpError(400, 'Connect an API key for that provider in Settings first.');
   }
 
+  const scale = body.scale === 4 ? 4 : 2;
   await ensureMonthlyGrant(db, userId);
-  const cost = MODES[m].cost;
   const id = crypto.randomUUID();
   const t = now();
   await db
     .prepare(
-      `INSERT INTO jobs(id, user_id, project_id, mode, provider_name, status, stage, cost, idempotency_key, input, attempts, created_at, updated_at)
-       VALUES(?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, 1, ?, ?)`,
+      `INSERT INTO jobs(id, user_id, project_id, kind, mode, provider_name, status, stage, cost, idempotency_key, input, attempts, created_at, updated_at)
+       VALUES(?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, 1, ?, ?)`,
     )
-    .bind(id, userId, body.projectId, m, provider.id, STAGES[0], cost, idem, JSON.stringify({ prompt, keyProvider, assetId }), t, t)
+    .bind(id, userId, body.projectId, kind, mode, provider.id, stagesFor(kind)[0], cost, idem, JSON.stringify({ prompt, keyProvider, assetId, sourceName, scale }), t, t)
     .run();
 
-  if (!(await charge(db, userId, cost, `${MODES[m].label} generation`, `job:${id}:charge`))) {
+  if (!(await charge(db, userId, cost, `${label}`, `job:${id}:charge`))) {
     await db.prepare('DELETE FROM jobs WHERE id = ?').bind(id).run();
     throw new HttpError(402, `This needs ${cost} credits and you have ${await balance(db, userId)}.`);
   }
@@ -125,7 +173,7 @@ export async function createJob(db: D1Database, env: Env, providers: ProviderReg
 }
 
 /** Runs (or resumes) a job. Each finished stage is saved, so a retry continues where it stopped. */
-export async function runJob(db: D1Database, env: Env, providers: ProviderRegistry, jobId: string): Promise<void> {
+export async function runJob(db: D1Database, env: Env, reg: Registry, jobId: string): Promise<void> {
   const claimed = await db
     .prepare("UPDATE jobs SET status = 'running', error = NULL, updated_at = ? WHERE id = ? AND status = 'queued'")
     .bind(now(), jobId)
@@ -133,21 +181,25 @@ export async function runJob(db: D1Database, env: Env, providers: ProviderRegist
   if (!claimed.meta.changes) return;
 
   const job = (await db.prepare(`SELECT ${COLUMNS} FROM jobs WHERE id = ?`).bind(jobId).first<JobRow>())!;
-  const provider = providers[job.mode];
+  const provider = job.kind === 'motion' ? reg.modes[job.mode] : reg.tools[job.kind];
+  const stages = stagesFor(job.kind);
   let apiKey: string | undefined;
   let state = JSON.parse(job.state) as Record<string, unknown>;
   try {
-    if (!provider) throw new Error('This mode is not available.');
-    const input = JSON.parse(job.input) as { prompt: string; keyProvider?: string; assetId?: string };
-    if (job.mode === 'byok' && input.keyProvider) apiKey = (await readKey(db, env.KEY_ENCRYPTION_SECRET, job.user_id, input.keyProvider)) ?? undefined;
+    if (!provider) throw new Error('This is not available.');
+    const input = JSON.parse(job.input) as { prompt: string; keyProvider?: string; assetId?: string; sourceName?: string; scale?: number };
+    if (input.keyProvider) apiKey = (await readKey(db, env.KEY_ENCRYPTION_SECRET, job.user_id, input.keyProvider)) ?? undefined;
+    const owner = await db.prepare('SELECT user_id FROM projects WHERE id = ?').bind(job.project_id).first<{ user_id: string }>();
+    if (!owner) throw new Error('The project no longer exists.');
     const assets = {
-      read: (assetId: string) => readAsset(env, job.user_id, job.project_id, assetId),
+      read: (assetId: string) => readAssetRaw(env, owner.user_id, job.project_id, assetId),
       putJobFile: (name: string, bytes: Uint8Array, type: string) => putJobFile(env, job.id, name, bytes, type),
+      saveAsset: (assetId: string, name: string, bytes: Uint8Array, hd = false) => saveAsset(env, job.user_id, job.project_id, assetId, name, bytes, hd),
     };
 
-    for (let i = job.stage_done + 1; i < STAGES.length; i++) {
-      await db.prepare('UPDATE jobs SET stage = ?, updated_at = ? WHERE id = ?').bind(STAGES[i], now(), jobId).run();
-      const out = await provider.step(STAGES[i], { input, state, apiKey, assets });
+    for (let i = job.stage_done + 1; i < stages.length; i++) {
+      await db.prepare('UPDATE jobs SET stage = ?, updated_at = ? WHERE id = ?').bind(stages[i], now(), jobId).run();
+      const out = await provider.step(stages[i], { kind: job.kind, input, state, apiKey, assets });
       if (out) state = { ...state, ...out };
       await db.prepare('UPDATE jobs SET stage_done = ?, state = ?, updated_at = ? WHERE id = ?').bind(i, JSON.stringify(state), now(), jobId).run();
     }
@@ -166,11 +218,11 @@ export async function runJob(db: D1Database, env: Env, providers: ProviderRegist
 }
 
 /** Cron entry point: resume parked jobs, and rescue ones whose worker died mid-run. */
-export async function resumeJobs(db: D1Database, env: Env, providers: ProviderRegistry): Promise<number> {
+export async function resumeJobs(db: D1Database, env: Env, reg: Registry): Promise<number> {
   const t = now();
   await db.prepare("UPDATE jobs SET status = 'queued' WHERE status = 'running' AND updated_at < ?").bind(t - 300).run();
   const { results } = await db.prepare("SELECT id FROM jobs WHERE status = 'queued' AND updated_at < ? ORDER BY updated_at LIMIT 20").bind(t - 15).all<{ id: string }>();
-  for (const r of results) await runJob(db, env, providers, r.id);
+  for (const r of results) await runJob(db, env, reg, r.id);
   return results.length;
 }
 
