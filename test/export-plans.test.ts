@@ -47,8 +47,9 @@ describe('advanced export options', () => {
   });
 
   it('writes a licence that matches the plan', () => {
-    expect(strFromU8(unzipSync(buildZip(input, { commercial: true }))['LICENSE.txt'])).toContain('commercial projects');
-    expect(strFromU8(unzipSync(buildZip(input))['LICENSE.txt'])).toContain('make the export on');
+    const text = (opts: { commercial?: boolean }) => strFromU8(unzipSync(buildZip(input, opts))['LICENSE.txt']).replace(/\s+/g, ' ');
+    expect(text({ commercial: true })).toContain('personal and commercial projects');
+    expect(text({})).toContain('make the export on a Professional plan');
   });
 });
 
