@@ -49,19 +49,24 @@ test('renderers: WebGL for heavy particle scenes, canvas fallback, both draw and
       pinned: false, start: 0, end: 1, mobileScale: 0.7, parallax: 0, attachTo: null, offsetX: 0, offsetY: 0, ...extra,
     });
     const fire = obj({ id: 'fire', kind: 'effect', effect: { type: 'fire', count: 400, size: 40, color: '#ffb02e', spread: 8, rise: 25, loops: 6, seed: 7, layer: 'front' } });
-    const scene = { scene: { width: 1440, height: 900, background: 'transparent' }, objects: [fire], scroll: { length: 1200, scrub: true, reverse: true, smoothing: 0.05 } };
+    const dot = obj({ id: 'dot', kind: 'shape', shape: { type: 'circle', color: '#ff0000', widthPct: 5, heightPct: 8, radius: 12, layer: 'front' } });
+    const trail = obj({ id: 'trail', kind: 'line', attachTo: 'dot', line: { color: '#00ff00', width: 3, cap: 'round', reveal: 'draw', dash: 0, layer: 'back' } });
+    const scene = { scene: { width: 1440, height: 900, background: 'transparent' }, objects: [fire, dot, trail], scroll: { length: 1200, scrub: true, reverse: true, smoothing: 0.05 } };
     const make = (id: string, renderer: 'auto' | 'canvas2d') => {
       const host = document.createElement('div');
       host.id = id;
       document.body.appendChild(host);
       const ctl = MF.mount(host, { scene, assets: {} }, { stageHeight: '600px', renderer });
-      return ctl.info().effects;
+      return ctl.info();
     };
     return { auto: make('host-auto', 'auto'), forced: make('host-2d', 'canvas2d') };
   });
 
-  expect(result.forced).toBe('canvas2d');
-  console.log('renderer chosen for 400 particles:', result.auto);
+  expect(result.forced.effects).toBe('canvas2d');
+  // shapes are HTML/CSS and lines are SVG whichever way particles are drawn
+  expect(result.auto).toMatchObject({ shapes: 'html', lines: 'svg' });
+  expect(result.forced).toMatchObject({ shapes: 'html', lines: 'svg' });
+  console.log('renderer chosen for 400 particles:', result.auto.effects);
 
   for (const host of ['#host-auto', '#host-2d']) {
     await scrollFraction(page, host, 0.5);
@@ -74,6 +79,24 @@ test('renderers: WebGL for heavy particle scenes, canvas fallback, both draw and
     const back = await paint(page, host);
     // scrolling back to the same spot draws the same picture
     expect(Math.abs(back.total - mid.total) / mid.total).toBeLessThan(0.02);
+  }
+
+  // the HTML shape moves and the SVG line draws itself in as you scroll, and both reverse exactly
+  for (const host of ['#host-auto', '#host-2d']) {
+    const read = () =>
+      page.evaluate((h) => ({
+        left: (document.querySelector(`${h} .mf-shape`) as HTMLElement).style.left,
+        offset: Number((document.querySelector(`${h} svg path`) as SVGPathElement).style.strokeDashoffset),
+      }), host);
+    await scrollFraction(page, host, 0.2);
+    const a = await read();
+    await scrollFraction(page, host, 0.8);
+    const b = await read();
+    await scrollFraction(page, host, 0.2);
+    const c = await read();
+    expect(a.left).not.toBe(b.left);
+    expect(b.offset).toBeLessThan(a.offset); // more of the line is drawn later in the scroll
+    expect(c).toEqual(a);
   }
 });
 
