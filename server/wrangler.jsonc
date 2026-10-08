@@ -1,0 +1,10 @@
+{
+  "name": "motionforge-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-01",
+  "d1_databases": [
+    { "binding": "DB", "database_name": "motionforge", "database_id": "REPLACE_WITH_YOUR_D1_ID", "migrations_dir": "migrations" }
+  ],
+  "vars": { "ALLOWED_ORIGIN": "https://REPLACE_WITH_YOUR_DOMAIN" }
+  // Secrets (never commit): npx wrangler secret put KEY_ENCRYPTION_SECRET   (base64, 32 random bytes)
+}
