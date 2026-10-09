@@ -30,9 +30,11 @@ function requireSecret(secret: string | undefined): asserts secret is string {
   }
 }
 
-export async function saveKey(db: D1Database, secret: string, userId: string, provider: string, apiKey: unknown): Promise<void> {
+export async function saveKey(db: D1Database, secret: string, userId: string, provider: string, pasted: unknown): Promise<void> {
   requireSecret(secret);
   assertProvider(provider);
+  // Copied keys often carry a stray space, line break or quotes.
+  const apiKey = typeof pasted === 'string' ? pasted.trim().replace(/^(['"])(.*)\1$/s, '$2').trim() : pasted;
   if (typeof apiKey !== 'string' || apiKey.length < 8 || apiKey.length > 400 || /\s/.test(apiKey)) {
     throw new HttpError(400, 'That does not look like an API key.');
   }

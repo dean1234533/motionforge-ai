@@ -45,4 +45,11 @@ describe('setup report', () => {
     expect((await app.call('DELETE', '/api/keys/openai', undefined, v.cookie)).status).toBe(200);
     expect((await app.call('PUT', '/api/keys/openai', { apiKey: 'sk-good-key-1234' }, v.cookie)).status).toBe(200);
   });
+
+  it('saves a pasted key with stray spaces, line breaks or quotes', async () => {
+    const app = makeApp();
+    const u = await app.user();
+    expect((await app.call('PUT', '/api/keys/replicate', { apiKey: ' "r8_pastedKey1234"\n' }, u.cookie)).status).toBe(200);
+    expect((await app.call('GET', '/api/keys', undefined, u.cookie)).body.keys[0].last4).toBe('1234');
+  });
 });
