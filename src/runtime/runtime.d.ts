@@ -36,7 +36,10 @@ export interface MFApi {
   sampleArray(a: number[], t: number): number;
   sampleFrameIndex(phase: number, count: number, playback?: 'once' | 'loop'): number;
   easings: Record<string, (t: number) => number>;
+  /** x, y, radius, r, g, b, a, angle, stretch per particle. */
   computeParticles(effect: unknown, pose: MFPose, w: number, h: number, mobileScale?: number): Float32Array;
+  /** Floats per particle in computeParticles' output. */
+  PARTICLE_STRIDE: number;
   chooseRenderer(scene: unknown, glAvailable: boolean): 'webgl' | 'canvas2d';
 }
 

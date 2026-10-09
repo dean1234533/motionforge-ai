@@ -6,8 +6,10 @@ const id = z.string().regex(/^[a-z0-9-]{1,40}$/);
 export const EASINGS = ['linear', 'easeIn', 'easeOut', 'easeInOut', 'cinematic'] as const;
 export type Easing = (typeof EASINGS)[number];
 
-export const EFFECT_TYPES = ['smoke', 'fire', 'water', 'sparkle', 'snow'] as const;
+export const EFFECT_TYPES = ['smoke', 'fire', 'water', 'sparkle', 'snow', 'rain'] as const;
 export type EffectType = (typeof EFFECT_TYPES)[number];
+/** Effects that fall across the whole stage rather than following a layer. */
+export const STAGE_EFFECTS: readonly EffectType[] = ['snow', 'rain'];
 
 export const KeyframeSchema = z.object({
   progress: num(0, 1),

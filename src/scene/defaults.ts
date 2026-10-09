@@ -1,4 +1,5 @@
 import type { EffectSettings, EffectType, Scene, SceneObject, ShapeSettings } from './schema';
+import { STAGE_EFFECTS } from './schema';
 
 export function emptyScene(): Scene {
   return {
@@ -45,6 +46,7 @@ export const EFFECT_LABELS: Record<EffectType, string> = {
   water: 'Water',
   sparkle: 'Sparkles',
   snow: 'Snow',
+  rain: 'Rain',
 };
 
 const PRESETS: Record<EffectType, Omit<EffectSettings, 'type' | 'seed' | 'layer'>> = {
@@ -52,7 +54,8 @@ const PRESETS: Record<EffectType, Omit<EffectSettings, 'type' | 'seed' | 'layer'
   fire: { count: 160, size: 26, color: '#ffb02e', spread: 3, rise: 16, loops: 12 },
   water: { count: 140, size: 9, color: '#6ab7ff', spread: 14, rise: 26, loops: 8 },
   sparkle: { count: 80, size: 9, color: '#fff3b0', spread: 22, rise: 18, loops: 6 },
-  snow: { count: 160, size: 9, color: '#ffffff', spread: 100, rise: 100, loops: 3 },
+  snow: { count: 180, size: 8, color: '#ffffff', spread: 100, rise: 100, loops: 3 },
+  rain: { count: 240, size: 5, color: '#a9c8e8', spread: 100, rise: 100, loops: 10 },
 };
 
 /**
@@ -60,6 +63,7 @@ const PRESETS: Record<EffectType, Omit<EffectSettings, 'type' | 'seed' | 'layer'
  */
 export function newEffect(id: string, type: EffectType, attachTo: string | null = null): SceneObject {
   const base = newObject(id, 'none', EFFECT_LABELS[type]);
+  const stage = STAGE_EFFECTS.includes(type);
   return {
     ...base,
     kind: 'effect',
@@ -68,8 +72,8 @@ export function newEffect(id: string, type: EffectType, attachTo: string | null 
     offsetX: 0,
     offsetY: attachTo ? 4 : 0,
     path: [
-      { progress: 0, x: 50, y: type === 'snow' ? 0 : 70 },
-      { progress: 1, x: 50, y: type === 'snow' ? 0 : 70 },
+      { progress: 0, x: 50, y: stage ? 0 : 70 },
+      { progress: 1, x: 50, y: stage ? 0 : 70 },
     ],
   };
 }

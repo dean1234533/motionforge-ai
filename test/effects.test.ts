@@ -64,10 +64,14 @@ describe('particles', () => {
     for (const type of EFFECT_TYPES) {
       const fx = newEffect(`fx-${type}`, type);
       const data = MF.computeParticles(fx.effect, pose(fx, 0.37), 1440, 900, 1);
-      expect(data.length).toBe(fx.effect!.count * 7);
+      expect(data.length).toBe(fx.effect!.count * MF.PARTICLE_STRIDE);
       for (let i = 0; i < data.length; i++) expect(Number.isFinite(data[i])).toBe(true);
-      for (let i = 6; i < data.length; i += 7) expect(data[i]).toBeGreaterThanOrEqual(0);
-      for (let i = 6; i < data.length; i += 7) expect(data[i]).toBeLessThanOrEqual(1);
+      for (let i = 0; i < data.length; i += MF.PARTICLE_STRIDE) {
+        expect(data[i + 2]).toBeGreaterThan(0);
+        for (let c = 3; c <= 6; c++) expect(data[i + c]).toBeGreaterThanOrEqual(0);
+        for (let c = 3; c <= 6; c++) expect(data[i + c]).toBeLessThanOrEqual(1);
+        expect(data[i + 8]).toBeGreaterThanOrEqual(1);
+      }
     }
   });
 
@@ -85,8 +89,60 @@ describe('particles', () => {
     const emitterY = (smoke.path[0].y / 100) * 900;
     const data = MF.computeParticles(smoke.effect, pose(smoke, 0.5), 1440, 900, 1);
     let above = 0;
-    for (let i = 1; i < data.length; i += 7) if (data[i] <= emitterY + 1) above++;
+    for (let i = 1; i < data.length; i += MF.PARTICLE_STRIDE) if (data[i] <= emitterY + 1) above++;
     expect(above).toBe(smoke.effect!.count);
+  });
+
+  it('smoke spreads into a wider plume as it rises', () => {
+    const smoke = { ...newEffect('smoke-1', 'smoke'), effect: { ...newEffect('s', 'smoke').effect!, count: 800 } };
+    const cx = (smoke.path[0].x / 100) * 1440;
+    const ey = (smoke.path[0].y / 100) * 900;
+    const rise = (smoke.effect.rise / 100) * 900;
+    const data = MF.computeParticles(smoke.effect, pose(smoke, 0.5), 1440, 900, 1);
+    const low: number[] = [], high: number[] = [];
+    for (let i = 0; i < data.length; i += MF.PARTICLE_STRIDE) {
+      const up = (ey - data[i + 1]) / rise;
+      if (up < 0.25) low.push(Math.abs(data[i] - cx));
+      else if (up > 0.6) high.push(Math.abs(data[i] - cx));
+    }
+    const mean = (a: number[]) => a.reduce((t, v) => t + v, 0) / a.length;
+    expect(mean(high)).toBeGreaterThan(mean(low) * 1.5);
+  });
+
+  it('fire is hottest (brightest) low in the flame and cools to red at the tips', () => {
+    const fire = { ...newEffect('fire-1', 'fire'), effect: { ...newEffect('f', 'fire').effect!, count: 800 } };
+    const ey = (fire.path[0].y / 100) * 900;
+    const rise = (fire.effect.rise / 100) * 900;
+    const data = MF.computeParticles(fire.effect, pose(fire, 0.5), 1440, 900, 1);
+    const green = { low: [] as number[], high: [] as number[] };
+    for (let i = 0; i < data.length; i += MF.PARTICLE_STRIDE) {
+      if (data[i + 2] < fire.effect.size * 0.2) continue; // embers
+      const up = (ey - data[i + 1]) / rise;
+      if (up < 0.15) green.low.push(data[i + 4]);
+      else if (up > 0.6) green.high.push(data[i + 4]);
+    }
+    const mean = (a: number[]) => a.reduce((t, v) => t + v, 0) / a.length;
+    expect(mean(green.low)).toBeGreaterThan(mean(green.high) + 0.2);
+  });
+
+  it('rain falls as long slanted streaks; snow flakes are round', () => {
+    const rain = newEffect('rain-1', 'rain');
+    const snow = newEffect('snow-1', 'snow');
+    const r = MF.computeParticles(rain.effect, pose(rain, 0.3), 1440, 900, 1);
+    const s = MF.computeParticles(snow.effect, pose(snow, 0.3), 1440, 900, 1);
+    for (let i = 0; i < r.length; i += MF.PARTICLE_STRIDE) expect(r[i + 8]).toBeGreaterThan(5);
+    for (let i = 0; i < s.length; i += MF.PARTICLE_STRIDE) expect(s[i + 8]).toBe(1);
+  });
+
+  it('nearer snowflakes are bigger and more opaque than distant ones', () => {
+    const snow = { ...newEffect('snow-1', 'snow'), effect: { ...newEffect('s', 'snow').effect!, count: 400 } };
+    const data = MF.computeParticles(snow.effect, pose(snow, 0.3), 1440, 900, 1);
+    const pts: { size: number; a: number }[] = [];
+    for (let i = 0; i < data.length; i += MF.PARTICLE_STRIDE) pts.push({ size: data[i + 2], a: data[i + 6] });
+    pts.sort((p, q) => p.size - q.size);
+    const q = Math.floor(pts.length / 4);
+    const avgA = (a: typeof pts) => a.reduce((t, p) => t + p.a, 0) / a.length;
+    expect(avgA(pts.slice(-q))).toBeGreaterThan(avgA(pts.slice(0, q)) + 0.2);
   });
 
   it('different seeds give different particles', () => {
@@ -125,7 +181,7 @@ describe('effect and depth commands', () => {
   it('rain and snow fall across the whole stage instead of following a layer', () => {
     const rain = applyEditCommand('Add rain', base, 'bird')!.scene.objects[1];
     expect(rain.attachTo).toBeNull();
-    expect(rain.effect).toMatchObject({ type: 'snow', color: '#9ec9ff' });
+    expect(rain.effect!.type).toBe('rain');
     expect(applyEditCommand('Put some snow in the scene', base, 'bird')!.scene.objects[1].effect!.type).toBe('snow');
   });
 

@@ -95,23 +95,39 @@
     return (n >>> 0) / 4294967296;
   }
   function rnd(seed, i, k) { return hash(Math.imul(seed + 1, 73856093) ^ Math.imul(i + 1, 19349663) ^ Math.imul(k + 1, 83492791)); }
+  // Two uniforms summed: -1..1, bunched in the middle, so emitters are dense at the centre and thin at the edges.
+  function tri(a, b) { return a + b - 1; }
+  function wrap(v, lo, span) { return lo + frac((v - lo) / span) * span; }
 
   function hexToRgb(h) {
     return [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
   }
   function mix(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
+  function shade(c, k) { return [c[0] * k, c[1] * k, c[2] * k]; }
 
-  var FIRE_MID = [1, 0.23, 0];
-  var FIRE_END = [0.25, 0.06, 0];
+  var WHITE = [1, 1, 1];
+  // Flame colour by temperature, hottest first: white-yellow core, the effect's colour, orange, dull red.
+  var FIRE_CORE = [1, 0.95, 0.78];
+  var FIRE_MID = [1, 0.32, 0.04];
+  var FIRE_END = [0.42, 0.05, 0.01];
+  function fireColor(base, heat) {
+    if (heat > 0.85) return mix(base, FIRE_CORE, (heat - 0.85) / 0.15);
+    if (heat > 0.4) return mix(FIRE_MID, base, (heat - 0.4) / 0.45);
+    return mix(FIRE_END, FIRE_MID, heat / 0.4);
+  }
+
+  /** Floats per particle in computeParticles' output. */
+  var STRIDE = 9;
 
   /**
    * Every particle's position is a pure function of (effect, particle index, cycle), so particles
    * scrub forwards and backwards exactly like everything else. Returns a flat array of
-   * x, y, size, r, g, b, a per particle (pixels, 0-1 colour).
+   * x, y, size, r, g, b, a, angle, stretch per particle: pixels (size is the radius), 0-1 colour,
+   * radians (0 = long axis vertical) and how many times longer than wide the particle is drawn.
    */
   function computeParticles(effect, pose, w, h, mobileScale) {
     var n = effect.count;
-    var data = new Float32Array(n * 7);
+    var data = new Float32Array(n * STRIDE);
     var s = clamp(w / 1440, 0.4, 1.5) * (mobileScale || 1);
     var ex = pose.x * w / 100;
     var ey = pose.y * h / 100;
@@ -120,48 +136,121 @@
     var base = hexToRgb(effect.color);
     var type = effect.type;
     var seed = effect.seed;
+    var cycle = pose.cycle;
+    // The whole effect shares one breeze, so neighbouring particles move together like a real plume.
+    var windDir = rnd(seed, 0, 99) < 0.5 ? -1 : 1;
     for (var i = 0; i < n; i++) {
-      var u = frac(pose.cycle + rnd(seed, i, 0));
-      var r1 = rnd(seed, i, 1), r2 = rnd(seed, i, 2), r3 = rnd(seed, i, 3);
-      var x, y, size, a, col = base;
+      var r1 = rnd(seed, i, 1), r2 = rnd(seed, i, 2), r3 = rnd(seed, i, 3), r4 = rnd(seed, i, 4), r5 = rnd(seed, i, 5), r6 = rnd(seed, i, 6);
+      // Particles live at slightly different speeds so they never pulse in step.
+      var u = frac(cycle * (0.8 + 0.4 * r6) + rnd(seed, i, 0));
+      var x, y, size, a, col = base, angle = 0, stretch = 1;
       if (type === 'smoke') {
-        x = ex + (r1 - 0.5) * spread * (0.4 + u) + Math.sin(u * 3 + r2 * TAU) * 8 * s * u;
-        y = ey - u * rise;
-        size = effect.size * s * (0.5 + 1.5 * u);
-        a = 0.55 * (1 - u) * Math.min(1, u * 8);
+        // Buoyant smoke shoots up, then slows, spreads into a widening plume and drifts downwind.
+        var hy = 1 - Math.pow(1 - u, 1.8);
+        var width = spread * (0.25 + 1.6 * hy);
+        var swirl = Math.sin(hy * 5.5 - cycle * 2.1 + seed) + 0.5 * Math.sin(hy * 11 + cycle * 3.4 + r2 * 2);
+        x = ex + tri(r1, r4) * width * 0.5 + swirl * spread * 0.45 * hy + windDir * hy * hy * rise * 0.18;
+        y = ey - hy * rise * (0.75 + 0.35 * r2);
+        size = effect.size * s * (0.35 + 1.9 * Math.sqrt(u)) * (0.75 + 0.5 * r3);
+        a = 0.42 * Math.min(1, u * 10) * Math.pow(1 - u, 1.5);
+        col = shade(base, 0.8 + 0.2 * Math.min(1, u * 3) + (r5 - 0.5) * 0.14);
+        angle = r5 * TAU + (r2 - 0.5) * 2 * u;
       } else if (type === 'fire') {
-        x = ex + (r1 - 0.5) * spread * (1 - u * 0.6) + Math.sin(u * 10 + r2 * TAU) * 3 * s;
-        y = ey - u * rise;
-        size = effect.size * s * (1 - 0.7 * u) * (0.7 + 0.6 * r3);
-        a = 0.9 * (1 - u);
-        col = u < 0.5 ? mix(base, FIRE_MID, u * 2) : mix(FIRE_MID, FIRE_END, (u - 0.5) * 2);
+        if (i % 12 === 0) {
+          // Embers: tiny glowing bits carried well above the flames, zig-zagging on the updraft.
+          x = ex + tri(r1, r4) * spread * 0.4 + Math.sin(u * TAU * (1.5 + r2) + r5 * TAU) * spread * 0.7 * u + windDir * u * spread;
+          y = ey - u * rise * (1.6 + 1.2 * r2);
+          size = effect.size * s * 0.1 * (0.6 + 0.8 * r3);
+          a = Math.min(1, u * 6) * (1 - u) * (0.6 + 0.4 * Math.sin(u * 40 + r5 * TAU));
+          col = fireColor(base, 0.55 - 0.4 * u);
+        } else {
+          // Flames: hot gas accelerates upwards and narrows into tongues that flicker and sway.
+          var off = tri(r1, r4);
+          var lift = (0.45 * u + 0.55 * u * u) * rise * (0.65 + 0.7 * r2);
+          var sway = Math.sin(cycle * 4.3 + lift / Math.max(rise, 1) * 3 + seed) * spread * 0.18 * u;
+          x = ex + off * spread * 0.5 * (1 - 0.8 * u) + sway + Math.sin(u * 9 + cycle * 7 + r2 * TAU) * spread * 0.06 * u;
+          y = ey - lift;
+          size = effect.size * s * (1 - 0.7 * u) * (0.7 + 0.6 * r3) * (0.85 + 0.15 * Math.sin(cycle * 23 + r5 * TAU));
+          a = 0.6 * Math.min(1, u * 6) * Math.pow(1 - u, 1.2);
+          // The centre and the base burn hottest; the edges and the tips cool to red.
+          col = fireColor(base, clamp(1 - u * (1 + 0.3 * r5) - Math.abs(off) * 0.35, 0, 1));
+          stretch = 1.7 - 0.5 * u;
+          angle = -sway / Math.max(spread, 1) * 1.5;
+        }
       } else if (type === 'water') {
-        x = ex + (r1 - 0.5) * spread * 2 * u;
-        y = ey - rise * 4 * u * (1 - u) * (0.6 + 0.4 * r2);
-        size = effect.size * s * (0.6 + 0.8 * r3);
-        a = 0.8 * Math.min(1, u * 10) * (1 - u * u);
+        var vx, vy;
+        if (i % 8 === 0) {
+          // Splashes where the falling water lands.
+          var land = ex + tri(r1, r4) * spread;
+          var hop = rise * 0.08 * (0.4 + r2);
+          vx = (r5 - 0.5) * spread * 0.3;
+          x = land + vx * u;
+          y = ey - 4 * hop * u * (1 - u);
+          vy = -4 * hop * (1 - 2 * u);
+          size = effect.size * s * 0.45 * (0.6 + 0.8 * r3);
+          a = 0.7 * (1 - u);
+        } else {
+          // Droplets are thrown up, slowed by gravity and fall back: a parabola, densest in the central jet.
+          var peak = rise * (0.65 + 0.35 * r2) * (1 - 0.35 * Math.abs(tri(r1, r4)));
+          vx = tri(r1, r4) * spread;
+          x = ex + vx * u;
+          y = ey - 4 * peak * u * (1 - u);
+          vy = -4 * peak * (1 - 2 * u);
+          size = effect.size * s * (r3 < 0.25 ? 0.35 : 0.6 + 0.7 * r3);
+          a = 0.85 * Math.min(1, u * 12) * (1 - Math.pow(u, 6));
+        }
+        // Fast drops blur into short streaks along their direction of travel; they are round at the top of the arc.
+        var speed = Math.sqrt(vx * vx + vy * vy);
+        stretch = 1 + Math.min(3, speed / Math.max(rise * 1.6, 1) * 3);
+        angle = Math.atan2(-vx, vy);
+        col = mix(base, WHITE, r5 * 0.4);
       } else if (type === 'sparkle') {
+        // Glints burst out, slow down in the air and drift up, flashing on and off.
         var ang = r1 * TAU;
-        var dist = u * spread * (0.4 + 0.6 * r2);
+        var dist = spread * (0.25 + 0.75 * r2) * (1 - Math.pow(1 - u, 2.5));
+        var tw = Math.pow(0.5 + 0.5 * Math.sin(u * TAU * (2 + 3 * r4) + r5 * TAU), 2);
         x = ex + Math.cos(ang) * dist;
-        y = ey + Math.sin(ang) * dist - u * rise * 0.2;
-        size = effect.size * s * (1 - u) * (0.5 + r3);
-        a = (0.5 + 0.5 * Math.sin(u * 12 + r2 * TAU)) * (1 - u);
-      } else { // snow: falls across the whole stage
-        x = r1 * w + Math.sin(u * TAU * 2 + r2 * TAU) * 20 * s;
-        y = -10 + u * (h + 20);
-        size = effect.size * s * (0.5 + r3);
-        a = 0.85;
+        y = ey + Math.sin(ang) * dist * 0.8 - u * rise * 0.3;
+        size = effect.size * s * (1 + r3) * (0.6 + 0.8 * tw) * (1 - 0.4 * u);
+        a = (0.35 + 0.65 * tw) * Math.min(1, u * 8) * Math.pow(1 - u, 0.8);
+        col = mix(base, WHITE, 0.55 * tw);
+        angle = (r6 - 0.5) * 0.5 + u * (r2 - 0.5);
+      } else {
+        // Snow and rain fill the whole stage. Each particle has a depth: near ones are bigger,
+        // faster and sharper, far ones small, slow and faint, which gives the scene real depth.
+        var rain = type === 'rain';
+        var z = r3;
+        var depthSpeed = rain ? 0.7 + 0.6 * z : 0.5 + 0.9 * z;
+        var uf = frac(cycle * depthSpeed + rnd(seed, i, 0));
+        var m = 0.08 * h;
+        var drift = windDir * (rain ? 0.12 : 0.05) * w * (0.4 + z);
+        y = -m + uf * (h + 2 * m);
+        if (rain) {
+          x = wrap(r1 * w + drift * uf, -m, w + 2 * m);
+          size = effect.size * s * 0.35 * (0.5 + z);
+          stretch = 7 + 9 * z;
+          angle = Math.atan2(-drift, h + 2 * m);
+          a = 0.22 + 0.5 * z;
+          col = mix(base, WHITE, 0.25 * z);
+        } else {
+          var flutter = Math.sin(uf * TAU * (1.2 + r4 * 1.8) + r2 * TAU) * (8 + 26 * z) * s;
+          x = wrap(r1 * w + drift * uf + flutter, -m, w + 2 * m);
+          size = effect.size * s * (0.3 + 1.1 * Math.pow(z, 1.5));
+          a = 0.3 + 0.6 * z;
+        }
       }
-      var o = i * 7;
+      var o = i * STRIDE;
       data[o] = x; data[o + 1] = y; data[o + 2] = Math.max(0.5, size);
-      data[o + 3] = col[0]; data[o + 4] = col[1]; data[o + 5] = col[2];
+      data[o + 3] = clamp(col[0], 0, 1); data[o + 4] = clamp(col[1], 0, 1); data[o + 5] = clamp(col[2], 0, 1);
       data[o + 6] = clamp(a * pose.opacity, 0, 1);
+      data[o + 7] = angle; data[o + 8] = stretch;
     }
     return data;
   }
 
   function isAdditive(effect) { return effect.type === 'fire' || effect.type === 'sparkle'; }
+  // The particle shape each effect is drawn with.
+  function particleStyle(effect) { return effect.type === 'smoke' ? 'puff' : effect.type === 'sparkle' ? 'glint' : 'soft'; }
 
   // WebGL pays off for lots of particles; below this, plain canvas keeps true layer order.
   var GL_THRESHOLD = 250;
@@ -183,10 +272,62 @@
     return glProbe;
   }
 
-  var VS = 'attribute vec2 a_pos;attribute float a_size;attribute vec4 a_color;uniform vec2 u_res;uniform float u_dpr;varying vec4 v_color;' +
-    'void main(){vec2 c=a_pos/u_res*2.0-1.0;gl_Position=vec4(c.x,-c.y,0.0,1.0);gl_PointSize=min(a_size*u_dpr,128.0);v_color=a_color;}';
-  var FS = 'precision mediump float;varying vec4 v_color;' +
-    'void main(){float r=length(gl_PointCoord-0.5)*2.0;float k=smoothstep(1.0,0.0,r);gl_FragColor=vec4(v_color.rgb*v_color.a*k,v_color.a*k);}';
+  // White particle shapes (alpha masks), shared by the canvas and WebGL renderers so both look the same.
+  var SPRITE = 64;
+  var masks = {};
+  function mask(style) {
+    if (masks[style]) return masks[style];
+    var c = document.createElement('canvas');
+    c.width = c.height = SPRITE;
+    var x = c.getContext('2d');
+    var R = SPRITE / 2;
+    function blob(cx, cy, r, alpha) {
+      // Roughly Gaussian falloff: no hard edge anywhere.
+      var g2 = x.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g2.addColorStop(0, 'rgba(255,255,255,' + alpha + ')');
+      g2.addColorStop(0.3, 'rgba(255,255,255,' + alpha * 0.75 + ')');
+      g2.addColorStop(0.6, 'rgba(255,255,255,' + alpha * 0.3 + ')');
+      g2.addColorStop(0.85, 'rgba(255,255,255,' + alpha * 0.07 + ')');
+      g2.addColorStop(1, 'rgba(255,255,255,0)');
+      x.fillStyle = g2;
+      x.fillRect(0, 0, SPRITE, SPRITE);
+    }
+    if (style === 'puff') {
+      // A billowing cloud: a cluster of overlapping soft lumps instead of one smooth disc.
+      blob(R, R, R * 0.75, 0.5);
+      for (var k = 0; k < 9; k++) {
+        var ang = rnd(7, k, 1) * TAU, d = R * (0.12 + 0.3 * rnd(7, k, 2));
+        blob(R + Math.cos(ang) * d, R + Math.sin(ang) * d, R * (0.3 + 0.25 * rnd(7, k, 3)), 0.4);
+      }
+    } else if (style === 'glint') {
+      // A bright point with a soft halo and a four-pointed star flare.
+      blob(R, R, R, 0.35);
+      blob(R, R, R * 0.5, 1);
+      x.globalCompositeOperation = 'lighter';
+      for (var v = 0; v < 2; v++) {
+        var lg = v ? x.createLinearGradient(R, 0, R, SPRITE) : x.createLinearGradient(0, R, SPRITE, R);
+        lg.addColorStop(0, 'rgba(255,255,255,0)');
+        lg.addColorStop(0.5, 'rgba(255,255,255,0.9)');
+        lg.addColorStop(1, 'rgba(255,255,255,0)');
+        x.fillStyle = lg;
+        if (v) x.fillRect(R - 2, 0, 4, SPRITE); else x.fillRect(0, R - 2, SPRITE, 4);
+      }
+    } else {
+      blob(R, R, R, 1);
+    }
+    masks[style] = c;
+    return c;
+  }
+
+  var VS = 'attribute vec2 a_pos;attribute float a_size;attribute vec4 a_color;attribute vec2 a_shape;uniform vec2 u_res;uniform float u_dpr;uniform float u_max;' +
+    'varying vec4 v_color;varying vec3 v_shape;' +
+    'void main(){vec2 c=a_pos/u_res*2.0-1.0;gl_Position=vec4(c.x,-c.y,0.0,1.0);gl_PointSize=min(a_size*2.0*a_shape.y*u_dpr,u_max);' +
+    'v_color=a_color;v_shape=vec3(cos(a_shape.x),sin(a_shape.x),a_shape.y);}';
+  // Turn the square point into a rotated, stretched sprite, matching the canvas renderer's transform.
+  var FS = 'precision mediump float;uniform sampler2D u_tex;varying vec4 v_color;varying vec3 v_shape;' +
+    'void main(){vec2 p=gl_PointCoord-0.5;vec2 l=vec2(v_shape.x*p.x+v_shape.y*p.y,-v_shape.y*p.x+v_shape.x*p.y);' +
+    'vec2 uv=vec2(l.x*v_shape.z,l.y)+0.5;if(uv.x<0.0||uv.x>1.0||uv.y<0.0||uv.y>1.0)discard;' +
+    'float k=texture2D(u_tex,uv).a*v_color.a;gl_FragColor=vec4(v_color.rgb*k,k);}';
 
   function createGLLayer(canvas) {
     var gl = null;
@@ -209,9 +350,26 @@
     var buf = gl.createBuffer();
     var loc = {
       pos: gl.getAttribLocation(prog, 'a_pos'), size: gl.getAttribLocation(prog, 'a_size'), color: gl.getAttribLocation(prog, 'a_color'),
-      res: gl.getUniformLocation(prog, 'u_res'), dpr: gl.getUniformLocation(prog, 'u_dpr')
+      shape: gl.getAttribLocation(prog, 'a_shape'),
+      res: gl.getUniformLocation(prog, 'u_res'), dpr: gl.getUniformLocation(prog, 'u_dpr'), max: gl.getUniformLocation(prog, 'u_max')
     };
+    var range = gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE);
+    var maxPoint = range && range[1] ? Math.min(range[1], 512) : 64;
+    var textures = {};
+    function texture(style) {
+      if (textures[style]) return textures[style];
+      var t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, mask(style));
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      textures[style] = t;
+      return t;
+    }
     gl.enable(gl.BLEND);
+    var bytes = STRIDE * 4;
     return {
       canvas: canvas,
       draw: function (batches, w, h, dpr) {
@@ -222,50 +380,55 @@
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.uniform2f(loc.res, w, h);
         gl.uniform1f(loc.dpr, dpr);
+        gl.uniform1f(loc.max, maxPoint);
         gl.bindBuffer(gl.ARRAY_BUFFER, buf);
         for (var b = 0; b < batches.length; b++) {
           var batch = batches[b];
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, texture(batch.style));
           gl.blendFunc(gl.ONE, batch.additive ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA);
           gl.bufferData(gl.ARRAY_BUFFER, batch.data, gl.DYNAMIC_DRAW);
           gl.enableVertexAttribArray(loc.pos);
-          gl.vertexAttribPointer(loc.pos, 2, gl.FLOAT, false, 28, 0);
+          gl.vertexAttribPointer(loc.pos, 2, gl.FLOAT, false, bytes, 0);
           gl.enableVertexAttribArray(loc.size);
-          gl.vertexAttribPointer(loc.size, 1, gl.FLOAT, false, 28, 8);
+          gl.vertexAttribPointer(loc.size, 1, gl.FLOAT, false, bytes, 8);
           gl.enableVertexAttribArray(loc.color);
-          gl.vertexAttribPointer(loc.color, 4, gl.FLOAT, false, 28, 12);
-          gl.drawArrays(gl.POINTS, 0, batch.data.length / 7);
+          gl.vertexAttribPointer(loc.color, 4, gl.FLOAT, false, bytes, 12);
+          gl.enableVertexAttribArray(loc.shape);
+          gl.vertexAttribPointer(loc.shape, 2, gl.FLOAT, false, bytes, 28);
+          gl.drawArrays(gl.POINTS, 0, batch.data.length / STRIDE);
         }
       }
     };
   }
 
-  // Soft round sprite per quantised colour, for the canvas fallback.
+  // A tinted copy of a particle shape per quantised colour, for the canvas renderer.
   var sprites = {};
-  function sprite(r, g, b) {
-    var key = (Math.round(r * 15) << 8) | (Math.round(g * 15) << 4) | Math.round(b * 15);
+  function sprite(style, r, g, b) {
+    var key = style + ((Math.round(r * 15) << 8) | (Math.round(g * 15) << 4) | Math.round(b * 15));
     if (sprites[key]) return sprites[key];
     var c = document.createElement('canvas');
-    c.width = c.height = 64;
+    c.width = c.height = SPRITE;
     var x = c.getContext('2d');
-    var grad = x.createRadialGradient(32, 32, 0, 32, 32, 32);
-    var rgb = Math.round(r * 255) + ',' + Math.round(g * 255) + ',' + Math.round(b * 255);
-    grad.addColorStop(0, 'rgba(' + rgb + ',1)');
-    grad.addColorStop(1, 'rgba(' + rgb + ',0)');
-    x.fillStyle = grad;
-    x.fillRect(0, 0, 64, 64);
+    x.drawImage(mask(style), 0, 0);
+    x.globalCompositeOperation = 'source-in';
+    x.fillStyle = 'rgb(' + Math.round(r * 255) + ',' + Math.round(g * 255) + ',' + Math.round(b * 255) + ')';
+    x.fillRect(0, 0, SPRITE, SPRITE);
     sprites[key] = c;
     return c;
   }
 
-  function drawParticles2D(ctx, data, additive) {
+  function drawParticles2D(ctx, data, style, additive, dpr) {
     ctx.save();
     ctx.globalCompositeOperation = additive ? 'lighter' : 'source-over';
-    for (var i = 0; i < data.length; i += 7) {
+    for (var i = 0; i < data.length; i += STRIDE) {
       var a = data[i + 6];
       if (a <= 0.002) continue;
-      var sz = data[i + 2] * 2;
+      var d = data[i + 2] * 2, st = data[i + 8];
+      var c = Math.cos(data[i + 7]) * dpr, sn = Math.sin(data[i + 7]) * dpr;
       ctx.globalAlpha = a;
-      ctx.drawImage(sprite(data[i + 3], data[i + 4], data[i + 5]), data[i] - sz / 2, data[i + 1] - sz / 2, sz, sz);
+      ctx.setTransform(c, sn, -sn, c, data[i] * dpr, data[i + 1] * dpr);
+      ctx.drawImage(sprite(style, data[i + 3], data[i + 4], data[i + 5]), -d / 2, -d * st / 2, d, d * st);
     }
     ctx.restore();
   }
@@ -507,9 +670,9 @@
 
         if (obj.effect) {
           var data = computeParticles(obj.effect, st, w, h, mobile ? obj.mobileScale : 1);
-          var additive = isAdditive(obj.effect);
-          if (effectsMode === 'webgl') (obj.effect.layer === 'back' ? back : front).push({ data: data, additive: additive });
-          else drawParticles2D(ctx, data, additive);
+          var additive = isAdditive(obj.effect), style = particleStyle(obj.effect);
+          if (effectsMode === 'webgl') (obj.effect.layer === 'back' ? back : front).push({ data: data, additive: additive, style: style });
+          else drawParticles2D(ctx, data, style, additive, dpr);
           continue;
         }
 
@@ -573,6 +736,6 @@
 
   g.MotionForge = {
     mount: mount, evaluate: evaluate, samplePath: samplePath, sampleArray: sampleArray, sampleFrameIndex: sampleFrameIndex, easings: easings,
-    computeParticles: computeParticles, chooseRenderer: chooseRenderer
+    computeParticles: computeParticles, PARTICLE_STRIDE: STRIDE, chooseRenderer: chooseRenderer
   };
 })(typeof window !== 'undefined' ? window : globalThis);

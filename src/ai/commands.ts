@@ -15,7 +15,7 @@ const EFFECT_WORDS: { re: RegExp; type: EffectType; settings?: Partial<EffectSet
   { re: /\b(fire|flames?|flaming|blaze)\b/, type: 'fire' },
   { re: /\b(water|splash|fountain)\b/, type: 'water' },
   { re: /\b(sparkles?|sparks|glitter)\b/, type: 'sparkle' },
-  { re: /\b(rain|raindrops?)\b/, type: 'snow', global: true, settings: { color: '#9ec9ff', size: 5, loops: 10, count: 220 } },
+  { re: /\b(rain|raindrops?)\b/, type: 'rain', global: true },
   { re: /\b(snow|snowfall|snowflakes?)\b/, type: 'snow', global: true },
 ];
 
@@ -59,7 +59,7 @@ export function applyEditCommand(prompt: string, scene: Scene, targetId: string 
       const next = parseScene({ ...scene, objects: [...scene.objects, effect] });
       if (!next.ok) return { scene, message: `That change would make the scene invalid (${next.error}).` };
       const follows = effect.attachTo ? ' It follows the selected layer.' : '';
-      return { scene: next.scene, message: `Added ${fx.type === 'snow' && fx.settings ? 'rain' : fx.type}.${follows} Adjust it in the properties panel.` };
+      return { scene: next.scene, message: `Added ${fx.type}.${follows} Adjust it in the properties panel.` };
     }
     const shapeWord = /\b(circle|ball|dot|disc|rectangle|square|box)\b/.exec(t);
     if (shapeWord) {

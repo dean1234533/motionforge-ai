@@ -12,7 +12,7 @@ import { buildPreviewHtml, buildSnippet, buildStandaloneHtml, buildZip } from '.
 import type { ExportOptions } from '../export/build';
 import { sanitizeFilename, sanitizeText, slug, validateUpload } from '../lib/sanitize';
 import { EFFECT_LABELS, emptyScene, newEffect, newLine, newObject, newShape } from '../scene/defaults';
-import { EASINGS, EFFECT_TYPES, parseScene } from '../scene/schema';
+import { EASINGS, EFFECT_TYPES, STAGE_EFFECTS, parseScene } from '../scene/schema';
 import type { EffectSettings, EffectType, Keyframe, LineSettings, Scene, SceneObject, ShapeSettings } from '../scene/schema';
 import { extractFrames, fitFrames } from '../ai/videoFrames';
 import { chromaScreenBlob, toUploadBlob } from '../ai/imagePipeline';
@@ -843,7 +843,7 @@ export function Editor({ initialPrompt, projectId, autoBird = false }: { initial
       setNotice('A scene can have up to 20 layers.');
       return;
     }
-    const follows = type !== 'snow' && sel ? sel.id : null;
+    const follows = !STAGE_EFFECTS.includes(type) && sel ? sel.id : null;
     const fx = newEffect(`${type}-${Math.random().toString(36).slice(2, 6)}`, type, follows);
     commit({ ...scene, objects: [...scene.objects, fx] });
     setSelectedId(fx.id);
@@ -1089,7 +1089,7 @@ export function Editor({ initialPrompt, projectId, autoBird = false }: { initial
             </select>
             <button type="button" className="btn small" onClick={() => addEffect(fxType)}>Add effect</button>
           </div>
-          <p className="muted small-note">Smoke, fire, water and sparkles follow the selected layer. Snow falls across the whole scene.</p>
+          <p className="muted small-note">Smoke, fire, water and sparkles follow the selected layer. Snow and rain fall across the whole scene.</p>
 
           <h2>Shapes and lines</h2>
           <div className="row">
