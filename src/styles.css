@@ -550,3 +550,7 @@ details[open] { border-color: #3b4766; }
   .landing-v2 .nav-cta { min-height: 44px; }
   .landing-v2 .studio-prompt button { width: 44px; height: 44px; }
 }
+
+.project-delete { min-height: 44px; margin-left: auto; }
+.project-delete-dialog { color: var(--text); }
+.project-delete-dialog::backdrop { background: rgba(0,0,0,.7); }

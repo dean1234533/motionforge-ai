@@ -58,6 +58,7 @@ export function App() {
       return <Auth mode="login" />;
     case '/signup':
       return <Auth mode="signup" />;
+    case '/projects':
     case '/dashboard':
       return <RequireAuth><Dashboard /></RequireAuth>;
     case '/new':
