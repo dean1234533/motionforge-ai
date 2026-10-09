@@ -169,4 +169,8 @@ export const MIGRATIONS: Migration[] = [
 )`,
     ],
   },
+  {
+    id: '0005_server_secrets',
+    statements: [`CREATE TABLE server_secrets (name TEXT PRIMARY KEY, value TEXT NOT NULL, created_at INTEGER NOT NULL)`],
+  },
 ];

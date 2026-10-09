@@ -16,9 +16,9 @@ The repo's [wrangler.jsonc](wrangler.jsonc) tells Wrangler what to create. On th
 
 Optional: to keep images in an R2 bucket instead (better for large amounts of data), create a bucket in the dashboard (**R2 Object Storage**) and add `"r2_buckets": [{ "binding": "FILES", "bucket_name": "your-bucket-name" }]` to `wrangler.jsonc`. New uploads then go to R2; existing ones stay in the database.
 
-Then add one secret (**Settings > Variables and Secrets**):
+Optionally add one secret (**Settings > Variables and Secrets**):
 
-- `KEY_ENCRYPTION_SECRET` — generate with `openssl rand -base64 32`. It encrypts users' saved API keys. Keep a copy; if you lose it, saved keys become unreadable. Without it, everything else works but saving API keys is switched off.
+- `KEY_ENCRYPTION_SECRET` — generate with `openssl rand -base64 32`. It encrypts users' saved API keys. Keep a copy; if you lose it, keys saved with it become unreadable. Without it, the server generates its own secret and keeps it in the database, so saving keys still works; setting one is better, because then a copy of the database alone cannot unlock the keys.
 
 Open the site, sign up, and you are running. Everything below is optional.
 

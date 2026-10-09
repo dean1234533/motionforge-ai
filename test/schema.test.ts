@@ -32,12 +32,11 @@ describe('self-applying migrations', () => {
     expect((app.sqlite.prepare('SELECT COUNT(*) AS n FROM _migrations').get() as { n: number }).n).toBe(MIGRATIONS.length);
   });
 
-  it('works through the API on a brand-new database, and saving keys fails clearly without a secret', async () => {
+  it('works through the API on a brand-new database, and saves keys without a host secret', async () => {
     const app = makeApp({}, { KEY_ENCRYPTION_SECRET: '' });
     const u = await app.user();
     expect((await app.call('GET', '/api/me', undefined, u.cookie)).status).toBe(200);
     const r = await app.call('PUT', '/api/keys/openai', { apiKey: 'sk-abcdefgh1234' }, u.cookie);
-    expect(r.status).toBe(501);
-    expect(r.body.error).toContain('KEY_ENCRYPTION_SECRET');
+    expect(r.status).toBe(200);
   });
 });

@@ -28,12 +28,14 @@ describe('setup report', () => {
     expect(res.text).not.toContain('r8_pasted');
   });
 
-  it('explains a wrong-length secret and keys saved under an old secret', async () => {
-    const short = makeApp({}, { KEY_ENCRYPTION_SECRET: 'a-32-character-password-typed-in' });
-    const u = await short.user();
-    const bad = await short.call('PUT', '/api/keys/openai', { apiKey: 'sk-good-key-1234' }, u.cookie);
-    expect(bad.status).toBe(500);
-    expect(bad.body.error).toContain('44 characters');
+  it('saves keys without a usable host secret, and explains keys saved under an old secret', async () => {
+    // No usable host secret: the server falls back to its own stored secret, so saving still works.
+    for (const hostSecret of ['', 'a-32-character-password-typed-in']) {
+      const bare = makeApp({}, { KEY_ENCRYPTION_SECRET: hostSecret });
+      const u = await bare.user();
+      expect((await bare.call('PUT', '/api/keys/replicate', { apiKey: 'r8_good-key-1234' }, u.cookie)).status).toBe(200);
+      expect((await bare.call('POST', '/api/keys/replicate/test', {}, u.cookie)).body.ok).toBe(true);
+    }
 
     const app = makeApp();
     const v = await app.user();
