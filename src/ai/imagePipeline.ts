@@ -189,7 +189,7 @@ export async function buildAsset(source: string, onStage: (s: Stage) => void, ma
 }
 
 export function encodeCanvas(c: HTMLCanvasElement): string {
-  const webp = c.toDataURL('image/webp', 0.88);
+  const webp = c.toDataURL('image/webp', 0.8);
   return webp.startsWith('data:image/webp') ? webp : c.toDataURL('image/png');
 }
 
@@ -228,17 +228,26 @@ export async function chromaScreenBlob(source: string, maxSide = 768): Promise<{
   return { blob, key };
 }
 
-/** A PNG (keeps transparency) no larger than 1600 px, small enough to upload to the server. */
+const MAX_UPLOAD = 4.9 * 1024 * 1024;
+
+/**
+ * Every image is compressed before it is saved: WebP where the browser can make it (keeps transparency),
+ * otherwise JPEG for opaque images and PNG only when transparency must be kept (Safari cannot encode
+ * WebP). Images are at most 1600px on their long side, and are shrunk further if still over the limit.
+ */
 export async function toUploadBlob(source: string): Promise<Blob> {
   const img = await loadImage(source);
-  const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
-  const c = document.createElement("canvas");
-  c.width = Math.max(1, Math.round(img.naturalWidth * k));
-  c.height = Math.max(1, Math.round(img.naturalHeight * k));
-  c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
-  const toBlob = (type: string, q?: number) => new Promise<Blob | null>((r) => c.toBlob(r, type, q));
-  let blob = await toBlob("image/png");
-  if (!blob || blob.size > 4.5 * 1024 * 1024) blob = await toBlob("image/webp", 0.9);
-  if (!blob || blob.size > 4.9 * 1024 * 1024) throw new Error("That image is too large to save. Try a smaller one.");
-  return blob;
+  let side = Math.min(1600, Math.max(img.naturalWidth, img.naturalHeight));
+  for (let tries = 0; tries < 6; tries++, side = Math.round(side * 0.8)) {
+    const k = side / Math.max(img.naturalWidth, img.naturalHeight);
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(img.naturalWidth * k));
+    c.height = Math.max(1, Math.round(img.naturalHeight * k));
+    c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
+    const toBlob = (type: string, q?: number) => new Promise<Blob | null>((r) => c.toBlob(r, type, q));
+    let blob = await toBlob("image/webp", 0.82);
+    if (!blob || blob.type !== "image/webp") blob = hasTransparency(c.getContext("2d")!.getImageData(0, 0, c.width, c.height)) ? await toBlob("image/png") : await toBlob("image/jpeg", 0.82);
+    if (blob && blob.size <= MAX_UPLOAD) return blob;
+  }
+  throw new Error("That image is too large to save. Try a smaller one.");
 }
