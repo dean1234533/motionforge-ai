@@ -2,12 +2,15 @@ import { detectKey, keyImageData } from './chromaKey';
 import type { KeyColor } from './chromaKey';
 import { FRAME_COUNT, encodeCanvas, localBackgroundRemover } from './imagePipeline';
 
+/** Resolves once the video has moved to `t`. Never hangs: some browsers skip 'seeked' for a no-op seek. */
 function seek(video: HTMLVideoElement, t: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const done = () => {
+      clearTimeout(timer);
       video.removeEventListener('seeked', done);
       resolve();
     };
+    const timer = setTimeout(done, 4000);
     video.addEventListener('seeked', done);
     video.onerror = () => reject(new Error('The generated video could not be read.'));
     video.currentTime = t;
@@ -39,14 +42,35 @@ async function lengthOf(video: HTMLVideoElement): Promise<number> {
  * `key` is the screen colour the subject was shot against; 'auto' works it out from the first frame.
  */
 export async function extractFrames(url: string, count = FRAME_COUNT, maxSide = 512, key: KeyColor | 'auto' = 'auto'): Promise<string[]> {
+  // Download it whole first: Safari will not load a video from a server that does not answer range
+  // requests, and a local copy makes every seek instant.
+  const res = await fetch(url, { credentials: 'same-origin' });
+  if (!res.ok) throw new Error('The generated video could not be downloaded. Try again.');
+  const local = URL.createObjectURL(await res.blob());
+  try {
+    return await framesFrom(local, count, maxSide, key);
+  } finally {
+    URL.revokeObjectURL(local);
+  }
+}
+
+async function framesFrom(url: string, count: number, maxSide: number, key: KeyColor | 'auto'): Promise<string[]> {
   const video = document.createElement('video');
   video.muted = true;
   video.playsInline = true;
   video.preload = 'auto';
   video.src = url;
+  video.load();
   await new Promise<void>((resolve, reject) => {
-    video.onloadeddata = () => resolve();
-    video.onerror = () => reject(new Error('The generated video could not be loaded.'));
+    const timer = setTimeout(() => reject(new Error('The generated video took too long to open. Try again.')), 30_000);
+    video.onloadeddata = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    video.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error('The generated video could not be loaded.'));
+    };
   });
   const duration = await lengthOf(video);
   if (!Number.isFinite(duration) || duration <= 0) throw new Error('The generated video has no length.');

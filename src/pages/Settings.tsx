@@ -112,7 +112,7 @@ export function Settings() {
       <table>
         <thead><tr><th scope="col">Mode</th><th scope="col">Provider</th><th scope="col">Credits</th><th scope="col">Status</th></tr></thead>
         <tbody>
-          {modes.map((m) => (
+          {modes.filter((m) => m.available || (m.mode !== 'fast' && m.mode !== 'professional')).map((m) => (
             <tr key={m.mode}>
               <th scope="row">{m.label}</th>
               <td>{m.provider ?? '—'}</td>

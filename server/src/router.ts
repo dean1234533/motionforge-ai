@@ -326,7 +326,12 @@ async function route(req: Request, rawEnv: RawEnv, deps: Deps, ctx?: Ctx): Promi
   m = path.match(/^\/api\/jobs\/([0-9a-f-]{36})(?:\/(retry|cancel|video))?$/);
   if (m) {
     const id = m[1];
-    if (!m[2] && method === 'GET') return json({ job: jobView(await getJob(db, user.id, id)) });
+    if (!m[2] && method === 'GET') {
+      const job = await getJob(db, user.id, id);
+      // Waiting on a provider: check it now, while someone is watching, instead of on the once-a-minute cron.
+      if (job.status === 'queued' && job.updated_at <= Math.floor(Date.now() / 1000) - 3) ctx?.waitUntil(runJob(db, env, reg, id));
+      return json({ job: jobView(job) });
+    }
     if (m[2] === 'video' && method === 'GET') {
       const job = await getJob(db, user.id, id);
       await projectAccess(db, user.id, job.project_id, 'read');
