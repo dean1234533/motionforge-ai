@@ -5,7 +5,8 @@ import { projectAccess } from './access';
 import { HttpError } from './http';
 import { projectLimit } from './plans';
 import { requireTeamEditor } from './teams';
-import type { D1Database } from './types';
+import { assetKey, framesKey } from './assets';
+import type { D1Database, Env } from './types';
 
 const now = () => Math.floor(Date.now() / 1000);
 const MAX_VERSIONS = 50;
@@ -120,10 +121,19 @@ export async function updateProject(db: D1Database, actorId: string, id: string,
   return getProject(db, actorId, id);
 }
 
-export async function deleteProject(db: D1Database, actorId: string, id: string) {
+/** Deletes the project, its records (which cascade) and every stored file: images, frames and job videos. */
+export async function deleteProject(env: Env, actorId: string, id: string) {
+  const db = env.DB;
   const access = await projectAccess(db, actorId, id, 'write');
   if (!access.canDelete) throw new HttpError(403, 'Only the project creator or team owner can delete this.');
+  const assets = await db.prepare('SELECT asset_id FROM assets WHERE project_id = ?').bind(id).all<{ asset_id: string }>();
+  const jobs = await db.prepare('SELECT id FROM jobs WHERE project_id = ?').bind(id).all<{ id: string }>();
   await db.prepare('DELETE FROM projects WHERE id = ?').bind(id).run();
+  const keys = [
+    ...assets.results.flatMap((a) => [assetKey(access.ownerId, id, a.asset_id), framesKey(access.ownerId, id, a.asset_id)]),
+    ...jobs.results.map((j) => `jobs/${j.id}/video.mp4`),
+  ];
+  if (keys.length) await env.FILES.delete(keys);
 }
 
 export async function listVersions(db: D1Database, actorId: string, id: string) {

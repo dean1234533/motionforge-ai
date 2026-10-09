@@ -53,3 +53,21 @@ export function d1Files(db: D1Database): R2Bucket {
     },
   };
 }
+
+/**
+ * Removes stored files whose project or job no longer exists (left behind by deletions before files were
+ * cleaned up with their project). Only the key column is read, from the primary-key index.
+ */
+export async function sweepOrphanFiles(db: D1Database, limit = 200): Promise<number> {
+  const { results } = await db
+    .prepare(
+      `SELECT DISTINCT key FROM file_chunks
+       WHERE (key LIKE 'u/%/p/%' AND substr(key, instr(key, '/p/') + 3, 36) NOT IN (SELECT id FROM projects))
+          OR (key LIKE 'jobs/%' AND substr(key, 6, 36) NOT IN (SELECT id FROM jobs))
+       LIMIT ?`,
+    )
+    .bind(limit)
+    .all<{ key: string }>();
+  for (const r of results) await db.prepare('DELETE FROM file_chunks WHERE key = ?').bind(r.key).run();
+  return results.length;
+}

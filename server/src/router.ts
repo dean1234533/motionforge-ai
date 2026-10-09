@@ -234,7 +234,7 @@ async function route(req: Request, rawEnv: RawEnv, deps: Deps, ctx?: Ctx): Promi
         return json({ project: await updateProject(db, user.id, id, { name: b.name, scene: b.scene, teamId: b.teamId }) });
       }
       if (method === 'DELETE') {
-        await deleteProject(db, user.id, id);
+        await deleteProject(env, user.id, id);
         return json({ ok: true });
       }
     } else if (kind === 'versions') {

@@ -1,3 +1,4 @@
+import { sweepOrphanFiles } from './d1files';
 import { resumeJobs } from './jobs';
 import { withDefaults } from './env';
 import type { RawEnv } from './env';
@@ -10,9 +11,11 @@ export default {
   fetch(req: Request, env: RawEnv, ctx: Ctx): Promise<Response> {
     return handle(req, env, undefined, ctx);
   },
-  /** Cron: resume generation jobs that are waiting on a remote provider. */
+  /** Cron: resume generation jobs that are waiting on a remote provider, and tidy up storage. */
   async scheduled(_event: unknown, raw: RawEnv, ctx: Ctx): Promise<void> {
     const env = withDefaults(raw);
     ctx.waitUntil(ensureSchema(env.DB).then(() => resumeJobs(env.DB, env, resolveRegistry(env, { fetchFn }))));
+    // Once an hour, clear out stored files that belong to deleted projects.
+    if (new Date().getUTCMinutes() === 0) ctx.waitUntil(ensureSchema(env.DB).then(() => sweepOrphanFiles(env.DB)));
   },
 };
