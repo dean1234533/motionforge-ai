@@ -17,4 +17,14 @@ describe('setup report', () => {
     expect(r2.body.setup).toMatchObject({ encryptionSecret: true, ai: true, replicateToken: true, proModel: true, email: true });
     expect(r2.text).not.toContain('r8_secret_value'); // values never leave the server
   });
+
+  it('finds settings saved under a slightly different name or with stray spaces and quotes', async () => {
+    const app = makeApp({ providers: undefined, tools: undefined }, { 'replicate_api_key ': ' "r8_pasted" \n', REPLICATE_PRO_MODEL: 'a/b' } as never);
+    const u = await app.user();
+    const res = await app.call('GET', '/api/modes', undefined, u.cookie);
+    expect(res.body.setup).toMatchObject({ replicateToken: true });
+    expect(res.body.modes.find((m: { mode: string }) => m.mode === 'fast').available).toBe(true);
+    expect(res.body.settingNames).toContain('replicate_api_key ');
+    expect(res.text).not.toContain('r8_pasted');
+  });
 });

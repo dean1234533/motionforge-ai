@@ -12,7 +12,7 @@ import { providersFromEnv, toolsFromEnv } from './replicate';
 import { createShare, getShared, listShares, revokeShare } from './shares';
 import { acceptInvite, createTeam, deleteTeam, getTeam, inviteMember, listTeams, previewInvite, removeMember, revokeInvite, setMemberRole } from './teams';
 import { projectAccess } from './access';
-import { withDefaults } from './env';
+import { settingNames, withDefaults } from './env';
 import type { RawEnv } from './env';
 import { ensureSchema } from './schema';
 import { mailConfigured, sendMail } from './mail';
@@ -301,13 +301,15 @@ async function route(req: Request, rawEnv: RawEnv, deps: Deps, ctx?: Ctx): Promi
       balance: await balance(db, user.id),
       // Yes/no only, never the values: lets the app say exactly what the server is missing.
       setup: {
-        encryptionSecret: Boolean(rawEnv.KEY_ENCRYPTION_SECRET),
+        encryptionSecret: Boolean(env.KEY_ENCRYPTION_SECRET),
         ai: Boolean(env.AI),
         replicateToken: Boolean(env.REPLICATE_API_TOKEN),
         proModel: Boolean(env.REPLICATE_PRO_MODEL || env.REPLICATE_PRO_VERSION),
         stripe: billingConfigured(env),
         email: mailConfigured(env),
       },
+      // Names only: shows whether a setting landed on this Worker under an unexpected name.
+      settingNames: settingNames(rawEnv),
     });
   }
   if (path === '/api/jobs' && method === 'GET') {
