@@ -21,7 +21,6 @@ interface TeamDetail {
 const inviteUrl = (token: string) => `${window.location.origin}${window.location.pathname}#/invite/${token}`;
 
 export function Teams() {
-  const { user } = useSession();
   const [teams, setTeams] = useState<TeamSummary[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [name, setName] = useState('');
@@ -63,7 +62,6 @@ export function Teams() {
         <input id="team-name" type="text" value={name} maxLength={60} placeholder="Team name" onChange={(e) => setName(e.target.value)} />
         <button type="submit" className="btn primary" disabled={!name.trim()}>Create team</button>
       </form>
-      {user?.plan !== 'professional' && <p className="muted small-note">Creating a team is part of the Professional plan. You can still join a team you are invited to.</p>}
 
       {!teams && !error && <p className="muted">Loading…</p>}
       {teams?.length === 0 && <div className="empty-card"><h2>No teams yet</h2><p className="muted">Create one, or open an invitation link someone sent you.</p></div>}

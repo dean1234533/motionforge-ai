@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSession } from '../lib/session';
 
-export function AppNav({ current }: { current: 'dashboard' | 'studio' | 'teams' | 'settings' | 'billing' }) {
-  const { user, credits, logout } = useSession();
+export function AppNav({ current }: { current: 'dashboard' | 'studio' | 'teams' | 'settings' }) {
+  const { user, logout } = useSession();
   // On phones the links fold into a dropdown behind the Menu button; on wider screens they always show.
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLElement>(null);
@@ -35,8 +35,7 @@ export function AppNav({ current }: { current: 'dashboard' | 'studio' | 'teams' 
         {link('studio', '#/studio', 'Brand Studio')}
         {link('teams', '#/teams', 'Teams')}
         {link('settings', '#/settings', 'Settings')}
-        {link('billing', '#/billing', 'Billing')}
-        <span className="muted" title={user?.email}>{credits} credits</span>
+        <span className="muted">{user?.email}</span>
         <button type="button" className="btn ghost small" onClick={() => void logout()}>Log out</button>
       </nav>
     </header>

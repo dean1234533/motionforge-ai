@@ -23,7 +23,6 @@ async function requireOwner(db: D1Database, userId: string, teamId: string) {
 }
 
 export async function createTeam(db: D1Database, user: { id: string; plan: string }, nameInput: unknown) {
-  if (user.plan !== 'professional') throw new HttpError(402, 'Team projects are part of the Professional plan.');
   const name = typeof nameInput === 'string' ? sanitizeText(nameInput, 60) : '';
   if (!name) throw new HttpError(400, 'Give the team a name.');
   const owned = await db.prepare('SELECT COUNT(*) AS n FROM teams WHERE owner_id = ?').bind(user.id).first<{ n: number }>();

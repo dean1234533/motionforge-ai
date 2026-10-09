@@ -3,26 +3,13 @@ import { resumeJobs } from '../server/src/jobs';
 import { resolveRegistry } from '../server/src/router';
 import { makeApp } from './server/harness';
 
-describe('plan limits', () => {
-  it('limits how many projects each plan can create', async () => {
+describe('plans', () => {
+  it('never limits how many projects can be created', async () => {
     const app = makeApp();
     const u = await app.user();
-    const ids: string[] = [];
-    for (let i = 0; i < 3; i++) {
-      const r = await app.call('POST', '/api/projects', { name: `P${i}` }, u.cookie);
-      expect(r.status).toBe(201);
-      ids.push(r.body.project.id);
+    for (let i = 0; i < 30; i++) {
+      expect((await app.call('POST', '/api/projects', { name: `P${i}` }, u.cookie)).status).toBe(201);
     }
-    const blocked = await app.call('POST', '/api/projects', { name: 'P3' }, u.cookie);
-    expect(blocked.status).toBe(402);
-    expect(blocked.body.error).toContain('up to 3 projects');
-
-    // deleting frees a slot, upgrading raises the limit
-    await app.call('DELETE', `/api/projects/${ids[0]}`, undefined, u.cookie);
-    expect((await app.call('POST', '/api/projects', { name: 'again' }, u.cookie)).status).toBe(201);
-    expect((await app.call('POST', '/api/projects', { name: 'one more' }, u.cookie)).status).toBe(402);
-    app.sqlite.prepare("UPDATE users SET plan = 'creator' WHERE id = ?").run(u.id);
-    expect((await app.call('POST', '/api/projects', { name: 'one more' }, u.cookie)).status).toBe(201);
   });
 
   it('describes each plan on the billing page', async () => {
@@ -41,6 +28,7 @@ describe('priority processing', () => {
     const app = makeApp();
     const free = await app.user();
     const pro = await app.user();
+    app.sqlite.prepare("UPDATE users SET plan = 'free' WHERE id = ?").run(free.id);
     app.sqlite.prepare("UPDATE users SET plan = 'professional' WHERE id = ?").run(pro.id);
     const mk = async (u: { cookie: string }, key: string) => {
       const pid = (await app.call('POST', '/api/projects', { name: 'P' }, u.cookie)).body.project.id;

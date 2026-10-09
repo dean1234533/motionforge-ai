@@ -1,7 +1,6 @@
 import { clearCookie, createSession, getUser, login, logout, rateLimit, sessionCookie, signup, validateCredentials } from './auth';
 import { deleteAsset, getJobFile, listAssets, readAsset, readAssetRaw, readFramesRaw, saveAsset, saveFrames, MAX_ASSET_BYTES, MAX_FRAMES_BYTES, readFrames } from './assets';
 import { billingConfigured, billingSummary, createCheckout, createPortal, handleStripeEvent, verifyStripeSignature } from './billing';
-import { balance, ensureMonthlyGrant } from './credits';
 import { HttpError, json, readJson } from './http';
 import { cancelJob, createJob, estimate, estimateTools, getJob, jobView, listJobs, retryJob, runJob } from './jobs';
 import { listKeys, removeKey, saveKey, testKey } from './keys';
@@ -120,8 +119,7 @@ async function route(req: Request, rawEnv: RawEnv, deps: Deps, ctx?: Ctx): Promi
     await rateLimit(db, `signup:${ip}`, 10, 3600);
     const b = await readJson(req);
     const { email, password } = validateCredentials(b.email, b.password);
-    const user = await signup(db, email, password);
-    await ensureMonthlyGrant(db, user.id);
+    const user = await signup(db, email, password, env.OWNER_EMAIL);
     const token = await createSession(db, user.id);
     return json({ user }, 201, { 'set-cookie': sessionCookie(token) });
   }
@@ -130,22 +128,19 @@ async function route(req: Request, rawEnv: RawEnv, deps: Deps, ctx?: Ctx): Promi
     const b = await readJson(req);
     const { email, password } = validateCredentials(b.email, b.password);
     await rateLimit(db, `login:${ip}:${email}`, 10, 900);
-    const user = await login(db, email, password);
+    const user = await login(db, email, password, env.OWNER_EMAIL);
     const token = await createSession(db, user.id);
     return json({ user }, 200, { 'set-cookie': sessionCookie(token) });
   }
 
-  const user: UserRow | null = await getUser(db, req);
+  const user: UserRow | null = await getUser(db, req, env.OWNER_EMAIL);
   if (path === '/api/auth/logout' && method === 'POST') {
     await logout(db, req);
     return json({ ok: true }, 200, { 'set-cookie': clearCookie() });
   }
   if (!user) throw new HttpError(401, 'Please log in.');
 
-  if (path === '/api/me' && method === 'GET') {
-    await ensureMonthlyGrant(db, user.id);
-    return json({ user, credits: await balance(db, user.id) });
-  }
+  if (path === '/api/me' && method === 'GET') return json({ user });
 
   // --- billing ---
   if (path === '/api/billing' && method === 'GET') return json(await billingSummary(env, user.id, user.plan));
@@ -291,14 +286,12 @@ async function route(req: Request, rawEnv: RawEnv, deps: Deps, ctx?: Ctx): Promi
 
   // --- generation ---
   if (path === '/api/estimate' && method === 'GET') {
-    const e = estimate(url.searchParams.get('mode') ?? '', reg.modes);
-    return json({ ...e, balance: await balance(db, user.id) });
+    return json(estimate(url.searchParams.get('mode') ?? '', reg.modes));
   }
   if (path === '/api/modes' && method === 'GET') {
     return json({
       modes: (['free', 'fast', 'professional', 'byok'] as const).map((mode) => estimate(mode, reg.modes)),
       tools: estimateTools(reg),
-      balance: await balance(db, user.id),
       // Yes/no only, never the values: lets the app say exactly what the server is missing.
       setup: {
         encryptionSecret: Boolean(env.KEY_ENCRYPTION_SECRET),
@@ -321,7 +314,7 @@ async function route(req: Request, rawEnv: RawEnv, deps: Deps, ctx?: Ctx): Promi
     await rateLimit(db, `jobs:${user.id}`, 30, 3600);
     const { job, created } = await createJob(db, env, reg, user.id, await readJson(req));
     if (created) ctx?.waitUntil(runJob(db, env, reg, job.id));
-    return json({ job: jobView(job), credits: await balance(db, user.id) }, created ? 202 : 200);
+    return json({ job: jobView(job) }, created ? 202 : 200);
   }
   m = path.match(/^\/api\/jobs\/([0-9a-f-]{36})(?:\/(retry|cancel|video|svg))?$/);
   if (m) {
@@ -357,7 +350,7 @@ async function route(req: Request, rawEnv: RawEnv, deps: Deps, ctx?: Ctx): Promi
     }
     if (m[2] === 'cancel' && method === 'POST') {
       await cancelJob(db, user.id, id);
-      return json({ job: jobView(await getJob(db, user.id, id)), credits: await balance(db, user.id) });
+      return json({ job: jobView(await getJob(db, user.id, id)) });
     }
   }
 

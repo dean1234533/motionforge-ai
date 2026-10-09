@@ -40,7 +40,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' }) {
         {error && <p className="error" role="alert">{error}</p>}
         <button type="submit" className="btn primary big" disabled={busy}>{busy ? 'Please wait…' : signup ? 'Sign up' : 'Log in'}</button>
         <p className="muted">
-          {signup ? <>Already have an account? <a href="#/login">Log in</a></> : <>New here? <a href="#/signup">Create an account</a></>}
+          {signup ? <>Already set up? <a href="#/login">Log in</a></> : <>This is a private app; only the owner can sign in.</>}
         </p>
         <p className="muted small-note">You can also <a href="#/editor">use the editor without an account</a>; your work then stays in this browser.</p>
       </form>

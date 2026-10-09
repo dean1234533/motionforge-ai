@@ -1,4 +1,3 @@
-import { grantOnce } from './credits';
 import { PLAN_FEATURES, projectLimit } from './plans';
 import { HttpError } from './http';
 import type { D1Database, Env } from './types';
@@ -127,13 +126,6 @@ export async function handleStripeEvent(db: D1Database, event: StripeEvent): Pro
         .bind(userId, o.customer, typeof o.subscription === 'string' ? o.subscription : null, plan, now())
         .run();
       await setPlan(db, userId, plan);
-      return;
-    }
-    case 'invoice.paid': {
-      if (typeof o.customer !== 'string') return;
-      const sub = await db.prepare('SELECT user_id, plan FROM subscriptions WHERE stripe_customer_id = ?').bind(o.customer).first<{ user_id: string; plan: string }>();
-      if (!sub || !isPaidPlan(sub.plan)) return;
-      await grantOnce(db, sub.user_id, PLANS[sub.plan].credits, `${PLANS[sub.plan].label} plan credits`, `stripe:${event.id}`);
       return;
     }
     case 'customer.subscription.updated':

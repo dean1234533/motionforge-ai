@@ -31,7 +31,7 @@ describe('crypto', () => {
 });
 
 describe('auth', () => {
-  it('signs up, sets a secure cookie, grants the monthly allowance', async () => {
+  it('signs up and sets a secure cookie', async () => {
     const app = makeApp();
     const r = await app.call('POST', '/api/auth/signup', { email: 'A@Example.com', password: 'correct horse battery' });
     expect(r.status).toBe(201);
@@ -41,7 +41,7 @@ describe('auth', () => {
     expect(cookie).toMatch(/SameSite=Lax/);
     const me = await app.call('GET', '/api/me', undefined, cookie.split(';')[0]);
     expect(me.body.user.email).toBe('a@example.com');
-    expect(me.body.credits).toBe(20);
+    expect(me.body.credits).toBeUndefined();
     expect(r.text).not.toMatch(/password/i);
   });
 
@@ -55,6 +55,27 @@ describe('auth', () => {
     expect((await app.call('POST', '/api/auth/login', { email: 'dup@example.com', password: 'correct horse battery' })).status).toBe(200);
     expect((await app.call('GET', '/api/me')).status).toBe(401);
     expect(u.cookie).toContain('mf_session=');
+  });
+
+  it('only lets the owner sign up or log in', async () => {
+    const pw = 'correct horse battery';
+    // Unset: only the built-in owner account. Nobody else can create an account.
+    const closed = makeApp({}, { OWNER_EMAIL: undefined });
+    expect((await closed.call('POST', '/api/auth/signup', { email: 'stranger@example.com', password: pw })).status).toBe(403);
+
+    const app = makeApp({}, { OWNER_EMAIL: 'Me@Example.com' });
+    expect((await app.call('POST', '/api/auth/signup', { email: 'stranger@example.com', password: pw })).status).toBe(403);
+    const me = await app.call('POST', '/api/auth/signup', { email: 'me@example.com', password: pw });
+    expect(me.status).toBe(201);
+    expect(me.body.user.plan).toBe('professional');
+    expect((await app.call('POST', '/api/auth/login', { email: 'me@example.com', password: pw })).status).toBe(200);
+
+    // An account made before the app was private can no longer log in or use its old session.
+    const open = makeApp();
+    const old = await open.user('old@example.com');
+    open.env.OWNER_EMAIL = 'me@example.com';
+    expect((await open.call('GET', '/api/me', undefined, old.cookie)).status).toBe(401);
+    expect((await open.call('POST', '/api/auth/login', { email: 'old@example.com', password: pw })).status).toBe(401);
   });
 
   it('logout invalidates the session', async () => {
@@ -160,12 +181,12 @@ describe('generation jobs', () => {
   it('estimates cost and reports unavailable modes honestly', async () => {
     const { call, u } = await setup();
     const free = await call('GET', '/api/estimate?mode=free', undefined, u.cookie);
-    expect(free.body).toMatchObject({ cost: 2, available: true, provider: 'local-rules', balance: 20 });
+    expect(free.body).toMatchObject({ cost: 0, available: true, provider: 'local-rules' });
     expect((await call('GET', '/api/estimate?mode=fast', undefined, u.cookie)).body.available).toBe(false);
     expect((await call('GET', '/api/estimate?mode=bogus', undefined, u.cookie)).status).toBe(400);
   });
 
-  it('runs a job through to a plan and charges once, even if the request repeats', async () => {
+  it('runs a job through to a plan once, even if the request repeats', async () => {
     const { call, settle, u, projectId } = await setup();
     const a = await call('POST', '/api/jobs', jobBody(projectId, 'idem-key-0001'), u.cookie);
     const b = await call('POST', '/api/jobs', jobBody(projectId, 'idem-key-0001'), u.cookie);
@@ -176,10 +197,9 @@ describe('generation jobs', () => {
     const done = await call('GET', `/api/jobs/${a.body.job.id}`, undefined, u.cookie);
     expect(done.body.job).toMatchObject({ status: 'complete', stage: 'Complete', attempts: 1 });
     expect(done.body.job.result.plan.patch.flapsPerScroll).toBeGreaterThan(0);
-    expect((await call('GET', '/api/me', undefined, u.cookie)).body.credits).toBe(18);
   });
 
-  it('resumes a failed job without re-running finished stages or charging again', async () => {
+  it('resumes a failed job without re-running finished stages', async () => {
     const seen: string[] = [];
     let failOnce = true;
     const flaky: ServerProvider = {
@@ -208,33 +228,30 @@ describe('generation jobs', () => {
     expect(done.body.job).toMatchObject({ status: 'complete', attempts: 2 });
     expect(seen.filter((s) => s === 'Analysing prompt')).toHaveLength(1);
     expect(seen.filter((s) => s === 'Generating motion')).toHaveLength(2);
-    expect((await call('GET', '/api/me', undefined, u.cookie)).body.credits).toBe(18);
     expect((await call('POST', `/api/jobs/${id}/retry`, {}, u.cookie)).status).toBe(409);
   });
 
-  it('refunds a failed job once when cancelled', async () => {
+  it('cancels a failed job once', async () => {
     const broken: ServerProvider = { id: 'broken', step: async () => { throw new Error('nope'); } };
     const { call, settle, u, projectId } = await setup({ providers: { free: broken } });
     const id = (await call('POST', '/api/jobs', jobBody(projectId, 'idem-key-0003'), u.cookie)).body.job.id;
     await settle();
-    expect((await call('GET', '/api/me', undefined, u.cookie)).body.credits).toBe(18);
     const c1 = await call('POST', `/api/jobs/${id}/cancel`, {}, u.cookie);
-    expect(c1.body.credits).toBe(20);
+    expect(c1.body.job.status).toBe('cancelled');
     expect((await call('POST', `/api/jobs/${id}/cancel`, {}, u.cookie)).status).toBe(409);
-    expect((await call('GET', '/api/me', undefined, u.cookie)).body.credits).toBe(20);
   });
 
-  it('blocks jobs the user cannot afford and unavailable modes', async () => {
+  it('never limits how many jobs run, and blocks unavailable modes', async () => {
     const fast: ServerProvider = { id: 'fast-sim', step: async () => undefined };
     const { call, settle, u, projectId } = await setup({ providers: { free: localRulesProvider, fast } });
     expect((await call('POST', '/api/jobs', jobBody(projectId, 'idem-key-0004', { mode: 'professional' }), u.cookie)).status).toBe(501);
     expect((await call('POST', '/api/jobs', jobBody(projectId, 'idem-key-0005', { mode: 'fast' }), u.cookie)).status).toBe(202);
     expect((await call('POST', '/api/jobs', jobBody(projectId, 'idem-key-0006', { mode: 'fast' }), u.cookie)).status).toBe(202);
-    const third = await call('POST', '/api/jobs', jobBody(projectId, 'idem-key-0007', { mode: 'fast' }), u.cookie);
-    expect(third.status).toBe(402);
+    for (let i = 0; i < 10; i++) {
+      expect((await call('POST', '/api/jobs', jobBody(projectId, `idem-key-01${i}0`, { mode: 'fast' }), u.cookie)).status).toBe(202);
+    }
     await settle();
-    expect((await call('GET', '/api/me', undefined, u.cookie)).body.credits).toBe(0);
-    expect((await call('GET', `/api/jobs?projectId=${projectId}`, undefined, u.cookie)).body.jobs).toHaveLength(2);
+    expect((await call('GET', `/api/jobs?projectId=${projectId}`, undefined, u.cookie)).body.jobs).toHaveLength(12);
   });
 
   it('bring-your-own-key jobs need a saved key, use it server-side, and never leak it', async () => {
@@ -261,7 +278,6 @@ describe('generation jobs', () => {
     const job = await call('GET', `/api/jobs/${created.body.job.id}`, undefined, u.cookie);
     expect(job.text).not.toContain(KEY);
     expect(job.body.job.error).toContain('[redacted]');
-    expect((await call('GET', '/api/me', undefined, u.cookie)).body.credits).toBe(20);
   });
 
   it('does not let one user read or retry another user\'s job', async () => {

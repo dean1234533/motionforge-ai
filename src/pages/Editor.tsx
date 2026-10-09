@@ -261,12 +261,11 @@ export function Editor({ initialPrompt, projectId, autoBird = false }: { initial
 
   useEffect(() => {
     if (!projectId) return;
-    api<{ modes: ModeInfo[]; tools: ToolInfo[]; balance: number; setup?: Record<string, boolean> }>('GET', '/api/modes')
+    api<{ modes: ModeInfo[]; tools: ToolInfo[]; setup?: Record<string, boolean> }>('GET', '/api/modes')
       .then((r) => {
         setSetup(r.setup ?? null);
         setServerModes(r.modes);
         setServerTools(r.tools);
-        session.setCredits(r.balance);
       })
       .catch(() => undefined);
   }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -769,8 +768,6 @@ export function Editor({ initialPrompt, projectId, autoBird = false }: { initial
         } catch (e) {
           setJob({ stage: 'Failed', error: e instanceof Error ? e.message : 'Could not use the generated result.' });
         }
-        const me = await api<{ credits: number }>('GET', '/api/me').catch(() => null);
-        if (me) session.setCredits(me.credits);
         if (chroma.current) {
           api('DELETE', `/api/projects/${projectId}/assets/${chroma.current.id}`).catch(() => undefined);
           chroma.current = null;
@@ -799,8 +796,7 @@ export function Editor({ initialPrompt, projectId, autoBird = false }: { initial
       return;
     }
     const keyProvider = requestedMode === 'byok' ? 'replicate' : undefined;
-    const cost = requested.cost === 0 ? 'no credits (you pay the provider directly)' : `${requested.cost} credits (you have ${session.credits})`;
-    if (!window.confirm(`This will use ${cost} with ${requested.provider}. Continue?`)) return;
+    if (!window.confirm(`Generate this with ${requested.provider}? Continue?`)) return;
     activeMotionPrompt.current = text;
     setMotionReview(null);
     try {
@@ -821,7 +817,7 @@ export function Editor({ initialPrompt, projectId, autoBird = false }: { initial
         jobAsset = screenId;
       }
       setJob({ stage: 'Analysing prompt' });
-      const created = await api<{ job: ServerJob; credits: number }>('POST', '/api/jobs', {
+      const created = await api<{ job: ServerJob }>('POST', '/api/jobs', {
         projectId,
         mode: requestedMode,
         realistic: Boolean(videoGeneration),
@@ -830,7 +826,6 @@ export function Editor({ initialPrompt, projectId, autoBird = false }: { initial
         assetId: jobAsset,
         keyProvider,
       });
-      session.setCredits(created.credits);
       await pollJob(created.job.id, target);
     } catch (e) {
       setJob({ stage: 'Failed', error: e instanceof Error ? e.message : 'Could not start the generation.' });
@@ -930,8 +925,6 @@ export function Editor({ initialPrompt, projectId, autoBird = false }: { initial
         } catch (e) {
           setJob({ stage: 'Failed', error: e instanceof Error ? e.message : 'Could not use the result.' });
         }
-        const me = await api<{ credits: number }>('GET', '/api/me').catch(() => null);
-        if (me) session.setCredits(me.credits);
         return;
       }
       if (job.status === 'cancelled') return setJob(null);
@@ -947,11 +940,11 @@ export function Editor({ initialPrompt, projectId, autoBird = false }: { initial
       return;
     }
     const ownKey = payWithKey || !tool.platformKey;
-    const price = ownKey ? `no credits (it uses your own ${tool.keyProvider} key)` : `${tool.cost} credits (you have ${session.credits})`;
-    if (!window.confirm(`${kind === 'image-gen' ? 'Generate an image' : 'Upscale this image'}: this will use ${price} with ${tool.provider}. Continue?`)) return;
+    const via = ownKey ? `your own ${tool.keyProvider} key with ${tool.provider}` : tool.provider;
+    if (!window.confirm(`${kind === 'image-gen' ? 'Generate an image' : 'Upscale this image'} using ${via}? Continue?`)) return;
     try {
       setJob({ stage: kind === 'image-gen' ? 'Generating image' : 'Upscaling' });
-      const created = await api<{ job: ServerJob; credits: number }>('POST', '/api/jobs', {
+      const created = await api<{ job: ServerJob }>('POST', '/api/jobs', {
         projectId,
         kind,
         prompt: opts.prompt ?? 'upscale',
@@ -961,7 +954,6 @@ export function Editor({ initialPrompt, projectId, autoBird = false }: { initial
         keyProvider: ownKey ? tool.keyProvider : undefined,
         idempotencyKey: crypto.randomUUID(),
       });
-      session.setCredits(created.credits);
       await pollTool(created.job.id, kind, opts);
     } catch (e) {
       setJob({ stage: 'Failed', error: e instanceof Error ? e.message : 'Could not start that.' });
@@ -1026,7 +1018,6 @@ export function Editor({ initialPrompt, projectId, autoBird = false }: { initial
           </div>
         </div>
         <div className="ed-top-group">
-          {projectId && <span className="muted" title="Credits available">{session.credits} credits</span>}
           {projectId && <button type="button" className="btn ghost" onClick={() => setShowShare(true)} disabled={readOnly}>Share</button>}
           <button type="button" className="btn ghost" onClick={history.undo} disabled={!history.canUndo}>Undo</button>
           <button type="button" className="btn ghost" onClick={history.redo} disabled={!history.canRedo}>Redo</button>
@@ -1118,11 +1109,11 @@ export function Editor({ initialPrompt, projectId, autoBird = false }: { initial
                       <>
                         <div className="row">
                           <button type="button" className="btn small primary" disabled={!aiPrompt.trim()} onClick={() => void runTool('image-gen', { prompt: aiPrompt })}>
-                            Generate image · {payWithKey || !t.platformKey ? 'your key' : `${t.cost} credits`}
+                            Generate image{payWithKey || !t.platformKey ? ' · your key' : ''}
                           </button>
                         </div>
                         {t.platformKey && t.keyProvider && (
-                          <label className="check"><input type="checkbox" checked={payWithKey} onChange={(e) => setPayWithKey(e.target.checked)} /> Use my own {t.keyProvider} key instead of credits</label>
+                          <label className="check"><input type="checkbox" checked={payWithKey} onChange={(e) => setPayWithKey(e.target.checked)} /> Use my own {t.keyProvider} key instead</label>
                         )}
                       </>
                     );
@@ -1346,8 +1337,8 @@ export function Editor({ initialPrompt, projectId, autoBird = false }: { initial
         {modeProblem(mode) && <p className="error small-note" role="status">{modeProblem(mode)}</p>}
         <p className="muted small-note">
           {projectId && mode !== 'free' && modeInfo
-            ? `Using ${modeInfo.provider ?? 'no provider'} · estimated cost: ${modeInfo.cost === 0 ? '0 credits (your own key)' : `${modeInfo.cost} credits`}`
-            : `Using ${providers.planner.id} · ${providers.backgroundRemover.id} · ${providers.motionFrames.id} · estimated cost: 0 credits`}
+            ? `Using ${modeInfo.provider ?? 'no provider'}`
+            : `Using ${providers.planner.id} · ${providers.backgroundRemover.id} · ${providers.motionFrames.id}`}
         </p>
       </div>
     </div>
@@ -1460,7 +1451,7 @@ function JobStatus({ job, onClose }: { job: NonNullable<Job>; onClose: () => voi
       </ol>
       {job.stage === 'Failed' && (
         <p>
-          {job.error} No credits were used.{' '}
+          {job.error}{' '}
           {job.retry && <button type="button" className="btn small" onClick={job.retry}>Retry</button>}{' '}
           <button type="button" className="btn small ghost" onClick={onClose}>Dismiss</button>
         </p>

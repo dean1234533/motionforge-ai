@@ -129,11 +129,14 @@ describe('billing', () => {
   }
   void webhook;
 
+  // The owner always has every feature; the plan Stripe sets is only recorded.
+  const storedPlan = (app: Awaited<ReturnType<typeof setup>>) => (app.sqlite.prepare('SELECT plan FROM users WHERE id = ?').get(app.u.id) as { plan: string }).plan;
+
   it('reports billing as unconfigured instead of faking checkout', async () => {
     const { call, u } = await setup();
     expect((await call('POST', '/api/billing/checkout', { plan: 'creator' }, u.cookie)).status).toBe(501);
     const s = await call('GET', '/api/billing', undefined, u.cookie);
-    expect(s.body).toMatchObject({ configured: false, plan: 'free', status: 'none' });
+    expect(s.body).toMatchObject({ configured: false, status: 'none' });
   });
 
   it('creates a Stripe checkout session for the signed-in user', async () => {
@@ -163,25 +166,20 @@ describe('billing', () => {
     expect((await signedWebhook(app, event)).status).toBe(200);
   });
 
-  it('upgrades a plan, grants credits once per invoice, and downgrades on cancellation', async () => {
+  it('records a plan from checkout and downgrades on cancellation', async () => {
     const app = await setup({}, env);
     await signedWebhook(app, {
       id: 'evt_checkout',
       type: 'checkout.session.completed',
       data: { object: { client_reference_id: app.u.id, customer: 'cus_1', subscription: 'sub_1', metadata: { plan: 'creator' } } },
     });
-    expect((await app.call('GET', '/api/me', undefined, app.u.cookie)).body.user.plan).toBe('creator');
-
-    const invoice = { id: 'evt_inv_1', type: 'invoice.paid', data: { object: { customer: 'cus_1' } } };
-    await signedWebhook(app, invoice);
-    await signedWebhook(app, invoice); // Stripe retries deliveries
-    expect((await app.call('GET', '/api/me', undefined, app.u.cookie)).body.credits).toBe(320);
+    expect(storedPlan(app)).toBe('creator');
 
     const summary = await app.call('GET', '/api/billing', undefined, app.u.cookie);
-    expect(summary.body).toMatchObject({ configured: true, plan: 'creator', status: 'active' });
+    expect(summary.body).toMatchObject({ configured: true, status: 'active' });
 
     await signedWebhook(app, { id: 'evt_del', type: 'customer.subscription.deleted', data: { object: { customer: 'cus_1' } } });
-    expect((await app.call('GET', '/api/me', undefined, app.u.cookie)).body.user.plan).toBe('free');
+    expect(storedPlan(app)).toBe('free');
     expect((await app.call('GET', '/api/billing', undefined, app.u.cookie)).body.status).toBe('canceled');
   });
 
@@ -189,7 +187,7 @@ describe('billing', () => {
     const app = await setup({}, env);
     await signedWebhook(app, { id: 'evt_a', type: 'checkout.session.completed', data: { object: { client_reference_id: 'nobody', customer: 'cus_9', metadata: { plan: 'creator' } } } });
     await signedWebhook(app, { id: 'evt_b', type: 'checkout.session.completed', data: { object: { client_reference_id: app.u.id, customer: 'cus_9', metadata: { plan: 'god-mode' } } } });
-    expect((await app.call('GET', '/api/me', undefined, app.u.cookie)).body.user.plan).toBe('free');
+    expect(storedPlan(app)).toBe('professional');
   });
 });
 
@@ -248,12 +246,11 @@ describe('Replicate provider (mocked HTTP; not verified against the live service
     expect((await app.call('GET', `/api/jobs/${created.body.job.id}`, undefined, app.u.cookie)).body.job.status).toBe('queued');
     await app.resume(); // second poll: succeeded, video downloaded
     const done = (await app.call('GET', `/api/jobs/${created.body.job.id}`, undefined, app.u.cookie)).body.job;
-    expect(done).toMatchObject({ status: 'complete', cost: 10 });
+    expect(done).toMatchObject({ status: 'complete', cost: 0 });
     expect(done.result.videoUrl).toBe(`/api/jobs/${created.body.job.id}/video`);
     const video = await app.call('GET', done.result.videoUrl, undefined, app.u.cookie);
     expect(Array.from(video.bytes)).toEqual([1, 2, 3, 4]);
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
-    expect((await app.call('GET', '/api/me', undefined, app.u.cookie)).body.credits).toBe(10);
   });
 
   it('checks on a waiting job when the app asks for it, without waiting for the cron', async () => {
@@ -299,8 +296,7 @@ describe('Replicate provider (mocked HTTP; not verified against the live service
     await app.resume();
     const failed = (await app.call('GET', `/api/jobs/${id}`, undefined, app.u.cookie)).body.job;
     expect(failed).toMatchObject({ status: 'failed', stage: 'Failed', error: 'Generation failed.' });
-    expect((await app.call('GET', '/api/me', undefined, app.u.cookie)).body.credits).toBe(10);
-    expect((await app.call('POST', `/api/jobs/${id}/cancel`, {}, app.u.cookie)).body.credits).toBe(20);
+    expect((await app.call('POST', `/api/jobs/${id}/cancel`, {}, app.u.cookie)).status).toBe(200);
   });
 
   it('requires one of the project images for paid modes', async () => {
@@ -325,7 +321,6 @@ describe('Replicate provider (mocked HTTP; not verified against the live service
     const done = (await app.call('GET', `/api/jobs/${created.body.job.id}`, undefined, app.u.cookie)).body;
     expect(done.job.status).toBe('complete');
     expect(JSON.stringify(done)).not.toContain('r8_user_key');
-    expect((await app.call('GET', '/api/me', undefined, app.u.cookie)).body.credits).toBe(20);
   });
 
   it('refuses result URLs from untrusted hosts', async () => {

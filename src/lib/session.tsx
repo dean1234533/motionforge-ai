@@ -10,29 +10,21 @@ export interface User {
 
 interface Session {
   user: User | null;
-  credits: number;
   loading: boolean;
-  setCredits: (n: number) => void;
   refresh: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
-const Ctx = createContext<Session>({ user: null, credits: 0, loading: false, setCredits: () => undefined, refresh: async () => undefined, logout: async () => undefined });
+const Ctx = createContext<Session>({ user: null, loading: false, refresh: async () => undefined, logout: async () => undefined });
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [credits, setCredits] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     try {
-      const me = await api<{ user?: User; credits?: number } | null>('GET', '/api/me');
-      if (me?.user) {
-        setUser(me.user);
-        setCredits(me.credits ?? 0);
-      } else {
-        setUser(null);
-      }
+      const me = await api<{ user?: User } | null>('GET', '/api/me');
+      setUser(me?.user ?? null);
     } catch {
       setUser(null);
     } finally {
@@ -45,7 +37,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       await api('POST', '/api/auth/logout', {});
     } finally {
       setUser(null);
-      setCredits(0);
       window.location.hash = '#/';
     }
   }, []);
@@ -54,7 +45,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
-  const value = useMemo(() => ({ user, credits, loading, setCredits, refresh, logout }), [user, credits, loading, refresh, logout]);
+  const value = useMemo(() => ({ user, loading, refresh, logout }), [user, loading, refresh, logout]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

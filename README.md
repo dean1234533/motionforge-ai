@@ -21,7 +21,7 @@ Everything below runs in CI on every push: unit tests (including the whole serve
 - **Teams** (Professional plan to create): owner/editor/viewer roles, single-use invite links tied to an email and **emailed** when mail is configured, shared team projects, read-only mode for viewers
 - Dashboard, new-project, teams, settings, billing, public share pages
 - Encrypted bring-your-own-key vault (AES-GCM, never returned or logged)
-- Credit ledger, cost estimate and confirmation before paid work, jobs with the spec's progress states, safe retry (never charged twice), refund on cancel, **priority processing** for Professional
+- Private, single-owner app: only the owner's account can sign up or log in, with no credits or limits on generation or projects. Jobs show progress states and retry safely
 - Paid generation: uploaded and generated subjects use Replicate image-to-video for articulated actions, then chroma-keyed transparent frames. Review, accept or regenerate each action; accepted sequences preserve the original image and support once/loop playback, reverse scrubbing and export. Model quality varies and realism cannot be guaranteed. Also supports **image generation**, **upscaling**; free with your own key
 - **Brand Studio**: logos (3D mascot, emblem, luxury, minimal…), flyers and posters, product ads, social posts and merch mockups from a short brief, with 1 to 4 variations, an editable prompt, PNG and **vector SVG** downloads, a **brand kit ZIP** for clients (logo, transparent PNG, SVG, colour sheet with HEX/RGB/CMYK, printable brand guide), and one-click **Animate** that opens a design in the editor with a ready-made logo motion (spin in, zoom reveal, drop in, fly across, float)
 - Share links (view-only, revocable), export history

@@ -41,7 +41,7 @@ export function Invite({ token }: { token: string }) {
             ) : (
               <>
                 <p className="muted">Log in or create an account with the email address this invitation was sent to, then open this link again.</p>
-                <p><a className="btn primary" href="#/login">Log in</a> <a className="btn" href="#/signup">Sign up</a></p>
+                <p><a className="btn primary" href="#/login">Log in</a></p>
               </>
             )}
           </>

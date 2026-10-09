@@ -57,7 +57,8 @@ export function makeApp(deps: Partial<Deps> = {}, envExtra: Partial<Env> = {}) {
   const sqlite = new Database(':memory:');
   sqlite.pragma('foreign_keys = ON');
   const files = fakeR2();
-  const env = { DB: sqliteD1(sqlite), FILES: files, KEY_ENCRYPTION_SECRET: SECRET, ...envExtra } as Env;
+  // The real app admits only its owner; most tests need several accounts, so they allow anyone.
+  const env = { DB: sqliteD1(sqlite), FILES: files, KEY_ENCRYPTION_SECRET: SECRET, OWNER_EMAIL: '*', ...envExtra } as Env;
   const pending: Promise<unknown>[] = [];
   const full: Deps = { providers: defaultProviders, fetchFn: async () => new Response('{}'), ...deps };
 

@@ -67,7 +67,6 @@ describe('Replicate models are described by their own schema', () => {
     const app = await setup({ 'bytedance/seedance-1-lite': modelBody({ image: uri }) });
     const free = await app.call('POST', '/api/jobs', video(app.pid, 'real-free-action-001', { mode: 'free', realistic: true }), app.u.cookie);
     expect(free.status).toBe(400);
-    expect((await app.call('GET', '/api/me', undefined, app.u.cookie)).body.credits).toBe(20);
     const paid = await app.call('POST', '/api/jobs', video(app.pid, 'no-prompt-action-001', { realistic: true }), app.u.cookie);
     await app.settle();
     const job = (await app.call('GET', `/api/jobs/${paid.body.job.id}`, undefined, app.u.cookie)).body.job;
@@ -127,7 +126,7 @@ describe('Replicate models are described by their own schema', () => {
     const id2 = (await missing.call('POST', '/api/jobs', video(missing.pid, 'discover-key-004'), missing.u.cookie)).body.job.id;
     await missing.settle();
     expect((await missing.call('GET', `/api/jobs/${id2}`, undefined, missing.u.cookie)).body.job.error).toContain('could not find the model');
-    expect((await missing.call('POST', `/api/jobs/${id2}/cancel`, {}, missing.u.cookie)).body.credits).toBe(20); // refunded
+    expect((await missing.call('POST', `/api/jobs/${id2}/cancel`, {}, missing.u.cookie)).status).toBe(200);
   });
 
   it('bring-your-own-key works with no platform token, using the person\'s own key for every call', async () => {
@@ -138,7 +137,6 @@ describe('Replicate models are described by their own schema', () => {
     await app.settle();
     for (const c of app.calls.filter((x) => x.url.includes('api.replicate.com'))) expect(c.auth).toBe('Bearer r8_user_key_ZZZZ');
     expect(app.calls.some((c) => c.url.endsWith('/models/bytedance/seedance-1-lite'))).toBe(true);
-    expect((await app.call('GET', '/api/me', undefined, app.u.cookie)).body.credits).toBe(20);
   });
 });
 
@@ -158,7 +156,7 @@ describe('upscaling with a named model', () => {
     await noScale.resume();
     await noScale.resume();
     const job = (await noScale.call('GET', `/api/jobs/${id}`, undefined, noScale.u.cookie)).body.job;
-    expect(job).toMatchObject({ status: 'complete', cost: 6 });
+    expect(job).toMatchObject({ status: 'complete', cost: 0 });
     const assets = (await noScale.call('GET', `/api/projects/${noScale.pid}/assets`, undefined, noScale.u.cookie)).body.assets;
     expect(assets.find((a: { id: string }) => a.id === job.result.assetId)).toMatchObject({ name: 'bird-hd.png', hd: true });
   });

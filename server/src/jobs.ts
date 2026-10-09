@@ -1,7 +1,6 @@
 import { sanitizeText } from '../../src/lib/sanitize';
 import { projectAccess } from './access';
 import { putJobFile, readAssetRaw, saveAsset } from './assets';
-import { balance, charge, ensureMonthlyGrant, refund } from './credits';
 import { HttpError } from './http';
 import { readKey } from './keys';
 import { ASPECTS, MODES, PendingError, TOOLS, stagesFor } from './providers';
@@ -79,7 +78,7 @@ export function estimateTools(reg: Registry) {
       provider: p?.id ?? null,
       keyProvider: p?.keyProviders?.[0] ?? null,
       available: Boolean(p),
-      /** True when credits can pay for it (the server holds a key). Otherwise only "your own key" works. */
+      /** True when the server holds a key for it. Otherwise only "your own key" works. */
       platformKey: Boolean(p?.platformKey),
     };
   });
@@ -110,30 +109,27 @@ export async function createJob(db: D1Database, env: Env, reg: Registry, userId:
   if (!promptRaw && !IMAGE_ONLY.includes(kind)) throw new HttpError(400, 'Describe what you want.');
   const prompt = promptRaw || kind;
 
-  // Same key from the same user returns the same job, never a second charge.
+  // Same key from the same user returns the same job, never a second run.
   const existing = await db.prepare(`SELECT ${COLUMNS} FROM jobs WHERE user_id = ? AND idempotency_key = ?`).bind(userId, idem).first<JobRow>();
   if (existing) return { job: existing, created: false };
 
   await projectAccess(db, userId, body.projectId, 'write');
 
-  // Work out which provider, label and price this job uses.
+  // Work out which provider and label this job uses.
   let provider: ServerProvider | undefined;
   let mode: Mode = 'free';
   let label: string;
-  let cost: number;
   let useOwnKey = false;
   if (kind === 'motion') {
     if (typeof body.mode !== 'string' || !Object.hasOwn(MODES, body.mode)) throw new HttpError(400, 'Choose a generation mode.');
     mode = body.mode as Mode;
     provider = reg.modes[mode];
     label = MODES[mode].label;
-    cost = MODES[mode].cost;
     useOwnKey = mode === 'byok';
   } else {
     provider = reg.tools[kind];
     label = TOOLS[kind].label;
     useOwnKey = body.useOwnKey === true;
-    cost = useOwnKey ? 0 : TOOLS[kind].cost;
     if (useOwnKey) mode = 'byok';
   }
   if (!provider) throw new HttpError(501, `${label} is not available yet.`);
@@ -171,7 +167,6 @@ export async function createJob(db: D1Database, env: Env, reg: Registry, userId:
           title: typeof body.title === 'string' ? sanitizeText(body.title, 40) || undefined : undefined,
         }
       : {};
-  await ensureMonthlyGrant(db, userId);
   const id = crypto.randomUUID();
   const t = now();
   await db
@@ -179,13 +174,8 @@ export async function createJob(db: D1Database, env: Env, reg: Registry, userId:
       `INSERT INTO jobs(id, user_id, project_id, kind, mode, provider_name, status, stage, cost, idempotency_key, input, attempts, created_at, updated_at)
        VALUES(?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, 1, ?, ?)`,
     )
-    .bind(id, userId, body.projectId, kind, mode, provider.id, stagesFor(kind)[0], cost, idem, JSON.stringify({ prompt, keyProvider, assetId, sourceName, scale, ...design }), t, t)
+    .bind(id, userId, body.projectId, kind, mode, provider.id, stagesFor(kind)[0], 0, idem, JSON.stringify({ prompt, keyProvider, assetId, sourceName, scale, ...design }), t, t)
     .run();
-
-  if (!(await charge(db, userId, cost, `${label}`, `job:${id}:charge`))) {
-    await db.prepare('DELETE FROM jobs WHERE id = ?').bind(id).run();
-    throw new HttpError(402, `This needs ${cost} credits and you have ${await balance(db, userId)}.`);
-  }
   return { job: await getJob(db, userId, id), created: true };
 }
 
@@ -251,7 +241,7 @@ export async function resumeJobs(db: D1Database, env: Env, reg: Registry, limit 
   return results.length;
 }
 
-/** Retrying never charges again: the original charge row is unique per job. */
+/** Retrying resumes from the last finished stage. */
 export async function retryJob(db: D1Database, userId: string, id: string): Promise<void> {
   const j = await getJob(db, userId, id);
   if (j.status !== 'failed') throw new HttpError(409, 'Only failed jobs can be retried.');
@@ -261,6 +251,5 @@ export async function retryJob(db: D1Database, userId: string, id: string): Prom
 export async function cancelJob(db: D1Database, userId: string, id: string): Promise<void> {
   const j = await getJob(db, userId, id);
   if (j.status !== 'failed') throw new HttpError(409, 'Only failed jobs can be cancelled.');
-  const r = await db.prepare("UPDATE jobs SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'failed'").bind(now(), id).run();
-  if (r.meta.changes) await refund(db, userId, j.cost, 'Refund for cancelled job', `job:${id}:refund`);
+  await db.prepare("UPDATE jobs SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'failed'").bind(now(), id).run();
 }
