@@ -24,6 +24,7 @@ export function Settings() {
   const [keys, setKeys] = useState<KeyInfo[] | null>(null);
   const [modes, setModes] = useState<ModeInfo[]>([]);
   const [setup, setSetup] = useState<Record<string, boolean> | null>(null);
+  const [seenNames, setSeenNames] = useState<string[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
@@ -31,9 +32,10 @@ export function Settings() {
   const load = async () => {
     try {
       setKeys((await api<{ keys: KeyInfo[] }>('GET', '/api/keys')).keys);
-      const m = await api<{ modes: ModeInfo[]; setup?: Record<string, boolean> }>('GET', '/api/modes');
+      const m = await api<{ modes: ModeInfo[]; setup?: Record<string, boolean>; settingNames?: string[] }>('GET', '/api/modes');
       setModes(m.modes);
       setSetup(m.setup ?? null);
+      setSeenNames(m.settingNames ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load settings.');
     }
@@ -139,6 +141,11 @@ export function Settings() {
               ))}
             </tbody>
           </table>
+          <p className="muted">
+            Variable and secret names this Worker can see (names only):{' '}
+            {seenNames.length ? <code>{seenNames.join(', ')}</code> : <b>none</b>}.
+            {' '}If a secret you added in Cloudflare is not listed, it was saved somewhere the running site cannot read: the Build settings, a different Worker or Pages project, or a different Cloudflare account.
+          </p>
         </>
       )}
       <p className="muted small-note">App version {__BUILD_ID__}</p>
