@@ -19,6 +19,15 @@ test('account pages and the cloud editor fit and work on a phone', async ({ page
   await expect(page.getByRole('heading', { name: 'Your projects' })).toBeVisible();
   await fitsWidth(page, 'dashboard');
 
+  // After signing in, a banner explains how to install the app; "Got it" hides it for good.
+  const banner = page.getByRole('complementary', { name: 'Install the app' });
+  await expect(banner).toBeVisible();
+  await banner.getByRole('button', { name: /Got it|Not now/ }).tap();
+  await expect(banner).toBeHidden();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Your projects' })).toBeVisible();
+  await expect(banner).toBeHidden();
+
   // The account links fold into a dropdown on phones.
   await expect(page.getByRole('link', { name: 'Settings' })).toBeHidden();
   await page.getByRole('button', { name: /Menu/ }).tap();

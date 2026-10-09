@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AppNav } from '../components/AppNav';
+import { InstallBanner } from '../components/InstallBanner';
 import { api, when } from '../lib/api';
 
 interface ProjectSummary {
@@ -56,6 +57,7 @@ export function Dashboard() {
   return (
     <div className="landing">
       <AppNav current="dashboard" />
+      <InstallBanner />
       <div className="row between">
         <h1>Your projects</h1>
         <a className="btn primary" href="#/new">New project</a>

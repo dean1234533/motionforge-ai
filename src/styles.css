@@ -131,6 +131,15 @@ summary { cursor: pointer; font-weight: 600; }
 .appnav nav a { color: var(--muted); text-decoration: none; }
 .appnav nav a.is-current, .appnav nav a:hover { color: var(--text); }
 .appnav { position: relative; }
+.install-banner { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px; margin: 4px 0 20px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; }
+.install-banner img { border-radius: 10px; }
+.install-banner p { margin: 2px 0 0; color: var(--muted); font-size: .9rem; }
+.install-actions { display: flex; gap: 8px; }
+.install-actions .btn { min-height: 40px; }
+@media (max-width: 600px) {
+  .install-banner { grid-template-columns: auto 1fr; }
+  .install-actions { grid-column: 1 / -1; justify-content: flex-end; }
+}
 .appnav-toggle { display: none; }
 @media (max-width: 600px) {
   .appnav-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; }
