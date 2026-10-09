@@ -22,6 +22,6 @@
   // Resumes generation jobs that are waiting on an AI provider.
   "triggers": { "crons": ["* * * * *"] }
   // Settings are in the Cloudflare dashboard: Workers & Pages > motionforge-ai > Settings > Variables and Secrets.
-  // Required secret:  KEY_ENCRYPTION_SECRET   (openssl rand -base64 32)   - without it, saving API keys is switched off.
+  // Recommended secret: KEY_ENCRYPTION_SECRET (openssl rand -base64 32) - without it, the server keeps its own key-encryption secret in the database.
   // Optional:         see DEPLOY.md (Stripe, Replicate, OpenAI, Resend, ALLOWED_ORIGIN, APP_URL).
 }

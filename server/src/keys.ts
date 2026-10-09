@@ -1,4 +1,4 @@
-import { decryptSecret, encryptSecret, unb64 } from './crypto';
+import { b64, decryptSecret, encryptSecret, unb64 } from './crypto';
 import { HttpError } from './http';
 import type { D1Database } from './types';
 
@@ -14,31 +14,40 @@ export function assertProvider(p: string): void {
   if (!Object.hasOwn(KEY_PROVIDERS, p)) throw new HttpError(400, `Unsupported provider. Choose one of: ${Object.keys(KEY_PROVIDERS).join(', ')}.`);
 }
 
-function requireSecret(secret: string | undefined): asserts secret is string {
-  if (!secret) throw new HttpError(501, 'Saving API keys is not set up on this server yet. The host needs to set KEY_ENCRYPTION_SECRET.');
-  let bytes = 0;
+function isValidSecret(secret: string | undefined): secret is string {
   try {
-    bytes = unb64(secret).length;
+    return !!secret && unb64(secret).length === 32;
   } catch {
-    // not base64; reported below
-  }
-  if (bytes !== 32) {
-    throw new HttpError(
-      500,
-      `KEY_ENCRYPTION_SECRET is the wrong length (${secret.length} characters). It must be the full output of "openssl rand -base64 32": 44 characters ending in "=".`,
-    );
+    return false;
   }
 }
 
-export async function saveKey(db: D1Database, secret: string, userId: string, provider: string, pasted: unknown): Promise<void> {
-  requireSecret(secret);
+/**
+ * Encryption secrets to try, preferred first: KEY_ENCRYPTION_SECRET when the host set a valid one,
+ * then a secret the server generates and keeps in its own database. The stored one means saving keys works
+ * with no setup at all; a host secret is still better, as it keeps the database alone from unlocking keys.
+ */
+async function secrets(db: D1Database, hostSecret: string | undefined): Promise<string[]> {
+  const out = isValidSecret(hostSecret) ? [hostSecret] : [];
+  let row = await db.prepare("SELECT value FROM server_secrets WHERE name = 'key_encryption'").first<{ value: string }>();
+  if (!row) {
+    const fresh = b64(crypto.getRandomValues(new Uint8Array(32)));
+    // Two first requests may race; whichever insert lands first wins and both read it back.
+    await db.prepare("INSERT OR IGNORE INTO server_secrets(name, value, created_at) VALUES('key_encryption', ?, ?)").bind(fresh, now()).run();
+    row = await db.prepare("SELECT value FROM server_secrets WHERE name = 'key_encryption'").first<{ value: string }>();
+  }
+  if (row) out.push(row.value);
+  return out;
+}
+
+export async function saveKey(db: D1Database, hostSecret: string | undefined, userId: string, provider: string, pasted: unknown): Promise<void> {
   assertProvider(provider);
   // Copied keys often carry a stray space, line break or quotes.
   const apiKey = typeof pasted === 'string' ? pasted.trim().replace(/^(['"])(.*)\1$/s, '$2').trim() : pasted;
   if (typeof apiKey !== 'string' || apiKey.length < 8 || apiKey.length > 400 || /\s/.test(apiKey)) {
     throw new HttpError(400, 'That does not look like an API key.');
   }
-  const { ciphertext, iv } = await encryptSecret(secret, apiKey, `${userId}:${provider}`);
+  const { ciphertext, iv } = await encryptSecret((await secrets(db, hostSecret))[0], apiKey, `${userId}:${provider}`);
   await db
     .prepare(
       `INSERT INTO provider_keys(user_id, provider, ciphertext, iv, last4, updated_at) VALUES(?, ?, ?, ?, ?, ?)
@@ -64,22 +73,24 @@ export async function removeKey(db: D1Database, userId: string, provider: string
 }
 
 /** Server-internal only. The result must never be returned to a client or logged. */
-export async function readKey(db: D1Database, secret: string, userId: string, provider: string): Promise<string | null> {
-  requireSecret(secret);
+export async function readKey(db: D1Database, hostSecret: string | undefined, userId: string, provider: string): Promise<string | null> {
   const row = await db
     .prepare('SELECT ciphertext, iv FROM provider_keys WHERE user_id = ? AND provider = ?')
     .bind(userId, provider)
     .first<{ ciphertext: string; iv: string }>();
   if (!row) return null;
-  try {
-    return await decryptSecret(secret, row.ciphertext, row.iv, `${userId}:${provider}`);
-  } catch {
-    // Saved under a different KEY_ENCRYPTION_SECRET (or the row was tampered with).
-    throw new HttpError(409, `Your saved ${provider} key was saved before the server's encryption secret changed, so it can no longer be read. Remove it in Settings and add it again.`);
+  for (const secret of await secrets(db, hostSecret)) {
+    try {
+      return await decryptSecret(secret, row.ciphertext, row.iv, `${userId}:${provider}`);
+    } catch {
+      // try the next secret
+    }
   }
+  // Saved under a KEY_ENCRYPTION_SECRET that has since changed (or the row was tampered with).
+  throw new HttpError(409, `Your saved ${provider} key was saved before the server's encryption secret changed, so it can no longer be read. Remove it in Settings and add it again.`);
 }
 
-export async function testKey(db: D1Database, secret: string, userId: string, provider: string, fetchFn: typeof fetch) {
+export async function testKey(db: D1Database, secret: string | undefined, userId: string, provider: string, fetchFn: typeof fetch) {
   assertProvider(provider);
   const key = await readKey(db, secret, userId, provider);
   if (!key) throw new HttpError(404, 'No key is saved for that provider.');

@@ -130,7 +130,7 @@ export function Settings() {
             <thead><tr><th scope="col">Setting</th><th scope="col">Found</th><th scope="col">What it enables</th></tr></thead>
             <tbody>
               {[
-                ['KEY_ENCRYPTION_SECRET', setup.encryptionSecret, 'Saving API keys (Settings above, bring-your-own-key)'],
+                ['KEY_ENCRYPTION_SECRET (optional)', setup.encryptionSecret, 'Extra protection for saved API keys. Without it the server keeps its own secret and saving keys still works'],
                 ['AI (Cloudflare Workers AI)', setup.ai, 'Understanding prompts and “Create with AI” images'],
                 ['REPLICATE_API_TOKEN', setup.replicateToken, 'Fast mode (video from a still) and paid upscaling'],
                 ['REPLICATE_PRO_MODEL', setup.proModel, 'Professional mode'],
