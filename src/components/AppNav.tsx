@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSession } from '../lib/session';
 
-export function AppNav({ current }: { current: 'dashboard' | 'teams' | 'settings' | 'billing' }) {
+export function AppNav({ current }: { current: 'dashboard' | 'studio' | 'teams' | 'settings' | 'billing' }) {
   const { user, credits, logout } = useSession();
   // On phones the links fold into a dropdown behind the Menu button; on wider screens they always show.
   const [open, setOpen] = useState(false);
@@ -32,6 +32,7 @@ export function AppNav({ current }: { current: 'dashboard' | 'teams' | 'settings
       </button>
       <nav aria-label="Account" id="appnav-menu" className={open ? 'is-open' : ''}>
         {link('dashboard', '#/dashboard', 'Projects')}
+        {link('studio', '#/studio', 'Brand Studio')}
         {link('teams', '#/teams', 'Teams')}
         {link('settings', '#/settings', 'Settings')}
         {link('billing', '#/billing', 'Billing')}

@@ -1,8 +1,8 @@
-import { openaiImageProvider } from './openaiImage';
+import { designAssetId, designFileName, openaiDesignProvider, openaiImageProvider } from './openaiImage';
 import { PendingError } from './providers';
-import type { ProviderRegistry, ServerProvider, ToolRegistry } from './providers';
+import type { Aspect, ProviderRegistry, ServerProvider, ToolRegistry } from './providers';
 import type { Env } from './types';
-import { workersAiImageProvider, workersAiPlannerProvider } from './workersAi';
+import { workersAiDesignProvider, workersAiImageProvider, workersAiPlannerProvider } from './workersAi';
 import { actionPlan, actionVideoPrompt } from '../../src/ai/actionMotion';
 
 const API = 'https://api.replicate.com/v1';
@@ -13,6 +13,8 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 export const DEFAULT_MODELS = {
   fast: 'bytedance/seedance-1-lite',
   upscale: 'recraft-ai/recraft-crisp-upscale',
+  /** Strong at lettering, which logos and flyers depend on. */
+  design: 'ideogram-ai/ideogram-v3-turbo',
 };
 
 /** Either a model name (`owner/name`, the app reads the model to learn its inputs) or an explicit version id. */
@@ -238,6 +240,72 @@ export function replicateUpscaleProvider(cfg: ReplicateConfig): ServerProvider {
   };
 }
 
+/** Ratios to try for each canvas, best first; models differ in which ones they offer. */
+const ASPECT_RATIOS: Record<Aspect, string[]> = {
+  square: ['1:1'],
+  portrait: ['4:5', '3:4', '2:3', '9:16'],
+  landscape: ['16:9', '3:2', '4:3', '5:4'],
+};
+
+/** What a text-to-image model needs: its version, and how (if at all) it takes a canvas shape. */
+export async function resolveTextToImage(cfg: ReplicateConfig, token: string): Promise<{ version: string; aspectRatios: string[] | null }> {
+  const t = cfg.target;
+  if (t.version) return { version: t.version, aspectRatios: null };
+  const res = await cfg.fetchFn(`${API}/models/${t.model}`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20_000) });
+  if (res.status === 401 || res.status === 403) throw new Error('The provider rejected the API key.');
+  if (res.status === 404) throw new Error(`Replicate could not find the model "${t.model}", or this key cannot use it.`);
+  if (!res.ok) throw new Error(`Replicate could not describe the model (${res.status}).`);
+  const model = (await res.json()) as { latest_version?: { id?: string; openapi_schema?: { components?: { schemas?: Schemas } } } };
+  const version = model.latest_version?.id;
+  if (!version) throw new Error(`The model "${t.model}" has no published version to run.`);
+  const schemas = model.latest_version?.openapi_schema?.components?.schemas ?? {};
+  const prop = schemas.Input?.properties?.aspect_ratio;
+  if (!prop) return { version, aspectRatios: null };
+  const choices = enumOf(prop, schemas)?.filter((c): c is string => typeof c === 'string');
+  return { version, aspectRatios: choices?.length ? choices : [] };
+}
+
+/** Brand Studio designs through a Replicate text-to-image model (Ideogram by default). */
+export function replicateDesignProvider(cfg: ReplicateConfig): ServerProvider {
+  return {
+    id: `replicate:${label(cfg.target)}`,
+    keyProviders: ['replicate'],
+    platformKey: Boolean(cfg.token),
+    async step(stage, ctx) {
+      if (stage !== 'Designing') return;
+      const token = ctx.apiKey ?? cfg.token;
+      if (!token) throw new Error('No API key is available for this provider.');
+      const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+
+      if (typeof ctx.state.predictionId !== 'string') {
+        const model = await resolveTextToImage(cfg, token);
+        const input: Record<string, unknown> = { prompt: ctx.input.prompt };
+        if (model.aspectRatios) {
+          const wanted = ASPECT_RATIOS[ctx.input.aspect ?? 'square'];
+          // An empty list means the model takes free text; otherwise use the first ratio it offers.
+          const ratio = model.aspectRatios.length ? wanted.find((r) => model.aspectRatios!.includes(r)) : wanted[0];
+          if (ratio) input.aspect_ratio = ratio;
+        }
+        throw new PendingError({ predictionId: await startPrediction(cfg, headers, model.version, input) });
+      }
+
+      const p = await pollPrediction(cfg, headers, ctx.state.predictionId);
+      if (p.status === 'failed' || p.status === 'canceled') throw new Error(`Design ${p.status}. Try different wording.`);
+      if (p.status !== 'succeeded') throw new PendingError();
+      const out = Array.isArray(p.output) ? p.output[0] : p.output;
+      if (typeof out !== 'string' || !trustedResultHost(out)) throw new Error('The provider returned an unexpected result.');
+      const img = await cfg.fetchFn(out, { signal: AbortSignal.timeout(60_000) });
+      if (!img.ok) throw new Error('The design could not be downloaded.');
+      const bytes = new Uint8Array(await img.arrayBuffer());
+      if (bytes.length === 0 || bytes.length > MAX_IMAGE_BYTES) throw new Error('The design is larger than the 5 MB limit.');
+      const id = designAssetId();
+      const ext = bytes[0] === 0xff ? 'jpg' : bytes[0] === 0x52 ? 'webp' : 'png';
+      await ctx.assets.saveAsset(id, designFileName(ctx.input.title, id, ext), bytes, false);
+      return { assetId: id };
+    },
+  };
+}
+
 function target(version: string | undefined, model: string | undefined, fallbackModel: string | undefined, imageField?: string, scaleField?: string): ModelTarget | null {
   if (version) return { version, imageField, scaleField };
   if (model) return { model };
@@ -255,7 +323,25 @@ export function toolsFromEnv(env: Env, fetchFn: typeof fetch): ToolRegistry {
   // Upscaling is always offered: with a platform token it costs credits, otherwise people use their own Replicate key.
   const up = target(env.REPLICATE_UPSCALE_VERSION, env.REPLICATE_UPSCALE_MODEL, DEFAULT_MODELS.upscale, env.REPLICATE_UPSCALE_IMAGE_FIELD, env.REPLICATE_UPSCALE_SCALE_FIELD);
   if (up) tools.upscale = replicateUpscaleProvider({ target: up, token: env.REPLICATE_API_TOKEN, fetchFn });
+  tools.design = designProvider(env, fetchFn);
   return tools;
+}
+
+/**
+ * Brand Studio picks, in order: a Replicate design model chosen on purpose, OpenAI images, Replicate's
+ * default design model when the server has a token, Cloudflare's built-in AI, and finally the default
+ * Replicate model paid for with each person's own key.
+ */
+function designProvider(env: Env, fetchFn: typeof fetch): ServerProvider {
+  const token = env.REPLICATE_API_TOKEN;
+  if (env.REPLICATE_DESIGN_VERSION || env.REPLICATE_DESIGN_MODEL) {
+    return replicateDesignProvider({ target: target(env.REPLICATE_DESIGN_VERSION, env.REPLICATE_DESIGN_MODEL, undefined)!, token, fetchFn });
+  }
+  if (env.OPENAI_IMAGE_MODEL) {
+    return openaiDesignProvider({ model: env.OPENAI_IMAGE_MODEL, token: env.OPENAI_API_KEY, transparent: env.OPENAI_IMAGE_TRANSPARENT === '1', fetchFn });
+  }
+  if (token || !env.AI) return replicateDesignProvider({ target: { model: DEFAULT_MODELS.design }, token, fetchFn });
+  return workersAiDesignProvider(env.AI);
 }
 
 /** Which video modes exist depends on what the operator has configured. */

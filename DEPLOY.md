@@ -62,6 +62,18 @@ These default model names are my suggestions from Replicate's published list. I 
 - Image generation (OpenAI): set `OPENAI_IMAGE_MODEL` to a model your account can use. Add `OPENAI_API_KEY` (secret) if credits should pay for it; leave it out to offer "use my own key" only. Set `OPENAI_IMAGE_TRANSPARENT=1` if the model supports transparent backgrounds.
 - Upscaling: see the Replicate section above.
 
+### Brand Studio (logos, flyers, product ads, mockups)
+
+Brand Studio (`#/studio`) turns a short brief into a detailed design prompt and saves each result in a "Brand Studio" project, where it can be downloaded or opened in the editor with a ready-made logo animation. It uses the first of these that is set up:
+
+1. `REPLICATE_DESIGN_MODEL` (variable, `owner/name`), or `REPLICATE_DESIGN_VERSION`: a Replicate text-to-image model you chose, for example `recraft-ai/recraft-v3`.
+2. `OPENAI_IMAGE_MODEL`: the OpenAI image model above. It renders lettering well, and gives logos a transparent background when `OPENAI_IMAGE_TRANSPARENT=1`.
+3. `REPLICATE_API_TOKEN`: `ideogram-ai/ideogram-v3-turbo`, which is strong at text in logos and flyers.
+4. Cloudflare's built-in AI (FLUX schnell). Always square, and weaker at lettering, so short brand names work best.
+5. Otherwise people use their own Replicate key with Ideogram.
+
+A design costs 6 credits (`server/src/providers.ts`). Like the other model defaults, the Ideogram suggestion has not been run against Replicate yet, so try one design after adding the token.
+
 ### Invitation emails (Resend)
 
 Set secret `RESEND_API_KEY` and variable `MAIL_FROM`, e.g. `MotionForge <team@yourdomain.com>` (verify the domain in Resend). Without these, team owners copy the invitation link and send it themselves.

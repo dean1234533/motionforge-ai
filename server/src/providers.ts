@@ -1,6 +1,10 @@
 import { planFromPrompt } from '../../src/ai/localPlanner';
 
-export type JobKind = 'motion' | 'image-gen' | 'upscale';
+export type JobKind = 'motion' | 'image-gen' | 'upscale' | 'design';
+
+/** Canvas shape for Brand Studio designs: logos are square, flyers portrait, banners landscape. */
+export type Aspect = 'square' | 'portrait' | 'landscape';
+export const ASPECTS: Aspect[] = ['square', 'portrait', 'landscape'];
 
 export const MOTION_STAGES = [
   'Analysing prompt',
@@ -16,7 +20,9 @@ export const STAGES = MOTION_STAGES;
 export const stagesFor = (kind: JobKind): readonly string[] =>
   kind === 'image-gen'
     ? ['Preparing image', 'Generating image', 'Optimising assets']
-    : kind === 'upscale'
+    : kind === 'design'
+      ? ['Preparing brief', 'Designing', 'Optimising assets']
+      : kind === 'upscale'
       ? ['Preparing image', 'Upscaling', 'Optimising assets']
       : MOTION_STAGES;
 
@@ -33,11 +39,22 @@ export const MODES: Record<Mode, { label: string; cost: number }> = {
 export const TOOLS: Record<Exclude<JobKind, 'motion'>, { label: string; cost: number }> = {
   'image-gen': { label: 'Image generation', cost: 4 },
   upscale: { label: 'Upscale', cost: 6 },
+  design: { label: 'Brand design', cost: 6 },
 };
 
 export interface StepContext {
   kind: JobKind;
-  input: { prompt: string; keyProvider?: string; assetId?: string; sourceName?: string; scale?: number };
+  input: {
+    prompt: string;
+    keyProvider?: string;
+    assetId?: string;
+    sourceName?: string;
+    scale?: number;
+    /** Brand Studio only. */
+    aspect?: Aspect;
+    transparent?: boolean;
+    title?: string;
+  };
   state: Record<string, unknown>;
   /** Decrypted user key (when the job uses the user's own key). Providers must never log or return it. */
   apiKey?: string;

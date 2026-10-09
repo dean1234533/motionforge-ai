@@ -23,6 +23,7 @@ Everything below runs in CI on every push: unit tests (including the whole serve
 - Encrypted bring-your-own-key vault (AES-GCM, never returned or logged)
 - Credit ledger, cost estimate and confirmation before paid work, jobs with the spec's progress states, safe retry (never charged twice), refund on cancel, **priority processing** for Professional
 - Paid generation: uploaded and generated subjects use Replicate image-to-video for articulated actions, then chroma-keyed transparent frames. Review, accept or regenerate each action; accepted sequences preserve the original image and support once/loop playback, reverse scrubbing and export. Model quality varies and realism cannot be guaranteed. Also supports **image generation**, **upscaling**; free with your own key
+- **Brand Studio**: logos (3D mascot, emblem, luxury, minimal…), flyers and posters, product ads, social posts and merch mockups from a short brief, with 1 to 4 variations, an editable prompt, downloads, and one-click **Animate** that opens a design in the editor with a ready-made logo motion (spin in, zoom reveal, drop in, fly across, float)
 - Share links (view-only, revocable), export history
 
 ## Written but not yet exercised against the real services
@@ -30,7 +31,7 @@ Everything below runs in CI on every push: unit tests (including the whole serve
 Unit-tested against mocked HTTP only. Treat as untested until run with real credentials (see DEPLOY.md):
 
 - **Stripe** checkout, customer portal and webhooks (signature verification is tested with the documented algorithm)
-- **Replicate** image-to-video and upscaling, **OpenAI** image generation, **Resend** email (the chroma-key step itself is tested on a real recorded video)
+- **Replicate** image-to-video, upscaling and Brand Studio designs, **OpenAI** image generation, **Resend** email (the chroma-key step itself is tested on a real recorded video)
 - Deployment to Cloudflare itself
 
 ## Run
