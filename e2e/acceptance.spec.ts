@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
 const PROMPT =
-  'Make this bird flap its wings and fly along a curved path from the bottom-left to the top-right as the user scrolls.';
+  'Move this image along a curved path from the bottom-left to the top-right as the user scrolls.';
 
 async function pose(page: Page) {
   return page.evaluate(() => {
@@ -107,4 +107,18 @@ test('upload -> prompt -> edit path -> export -> exported file works without the
   expect(Math.abs(back.y - a.y)).toBeLessThan(0.03);
 
   expect(external).toEqual([]);
+});
+
+
+test('articulated actions require image-to-video and leave the original scene intact', async ({ page }) => {
+  await page.goto('/#/editor');
+  await page.getByRole('button', { name: 'Use sample bird' }).click();
+  await expect(page.getByText('Motion frames created', { exact: false })).toBeVisible({ timeout: 60_000 });
+  const handles = page.getByRole('button', { name: /^Path point/ });
+  const before = await handles.count();
+  await page.locator('#prompt').fill('Make this robot dance by doing the moonwalk');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page.getByText('Realistic actions need an online project and Replicate image-to-video.', { exact: false })).toBeVisible();
+  await expect(handles).toHaveCount(before);
+  await expect(page.getByText('Planned a curved path', { exact: false })).toHaveCount(0);
 });

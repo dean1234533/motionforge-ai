@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
-const PROMPT = 'Make this bird flap its wings and fly along a curved path from the bottom-left to the top-right as the user scrolls.';
+const PROMPT = 'Move this image along a curved path from the bottom-left to the top-right as the user scrolls.';
 
 /** Count visible pixels across every canvas under `selector` (WebGL canvases are read back through a 2D canvas). */
 async function paint(page: Page, selector: string) {

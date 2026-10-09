@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
-const PROMPT = 'Make this bird flap its wings and fly along a curved path from the bottom-left to the top-right as the user scrolls.';
+const PROMPT = 'Move this image along a curved path from the bottom-left to the top-right as the user scrolls.';
 
 async function fitsWidth(page: Page, what: string) {
   const { sw, iw } = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: window.innerWidth }));
@@ -31,16 +31,19 @@ test('public pages fit a phone screen', async ({ page }) => {
   }
 });
 
-test('landing page: headline and sign-up are usable, wide tables scroll inside themselves', async ({ page }) => {
+test('landing page: headline, create button and FAQ are usable on a phone', async ({ page }) => {
   await page.goto('/');
   const h1 = page.getByRole('heading', { level: 1 });
   await expect(h1).toBeVisible();
   const box = (await h1.boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
-  await expect(page.getByRole('link', { name: 'Create your first animation' }).first()).toBeVisible();
-  await page.getByRole('table').first().scrollIntoViewIfNeeded();
-  await fitsWidth(page, 'comparison table');
+  await expect(page.getByRole('link', { name: 'Create an animation', exact: true })).toBeVisible();
+  const faq = page.locator('summary').filter({ hasText: 'Do I need to write code?' });
+  await faq.scrollIntoViewIfNeeded();
+  await faq.tap();
+  await expect(page.getByText('No. Upload an image, describe the motion', { exact: false })).toBeVisible();
+  await fitsWidth(page, 'expanded FAQ');
   expect(await smallTargets(page)).toEqual([]);
 });
 

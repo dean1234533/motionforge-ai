@@ -51,7 +51,7 @@ test('account -> project -> upload -> autosave -> reload -> share -> settings ->
   const png = await birdPng(page);
   await page.locator('input[type=file]').first().setInputFiles({ name: 'bird.png', mimeType: 'image/png', buffer: png });
   await expect(page.getByText('Motion frames created', { exact: false })).toBeVisible({ timeout: 60_000 });
-  await page.locator('#prompt').fill('Make this bird flap its wings and fly along a curved path from the bottom-left to the top-right as the user scrolls.');
+  await page.locator('#prompt').fill('Move this image along a curved path from the bottom-left to the top-right as the user scrolls.');
   await page.getByRole('button', { name: 'Send' }).click();
   await expect(page.getByText('Planned a curved path', { exact: false })).toBeVisible({ timeout: 30_000 });
   // wait for the server to confirm the save of the planned path (not just for the "Saved" label)
