@@ -515,13 +515,15 @@ export function Editor({ initialPrompt, projectId, autoBird = false }: { initial
         await uploadBinary(`/api/projects/${projectId}/assets/${assetId}?name=Robin%20flight`, await toUploadBlob(frames[0]));
         await api('PUT', `/api/projects/${projectId}/assets/${assetId}/frames`, frames);
       }
-      const replacing = replaceSelected && sel?.kind === 'image';
-      const object = replacing ? { ...sel!, assetId, name, flapsPerScroll: 8, widthPct: Math.min(100, sel!.widthPct * (sel!.name === 'Robin flight' ? 1 : 1.5)) }
+      const target = replaceSelected ? (sel?.kind === 'image' ? sel : sceneRef.current.objects.find((o) => o.kind === 'image' && /bird|robin/i.test(o.name))) : undefined;
+      const object = target ? { ...target, assetId, name, flapsPerScroll: 8, motion: undefined, widthPct: 33, bob: 0, followPath: false }
         : { ...newObject(uid('robin'), assetId, name), flapsPerScroll: 8, widthPct: 33, path: [{ progress: 0, x: 50, y: 80 }, { progress: 0.5, x: 32.6, y: 56 }, { progress: 1, x: 56.6, y: 31.7 }] };
       setAssets((prev) => [...prev, asset]);
-      commit({ ...sceneRef.current, objects: replacing
-        ? sceneRef.current.objects.map((o) => o.id === sel.id ? object : o)
-        : [...sceneRef.current.objects, object] });
+      const next = { ...sceneRef.current, objects: target
+        ? sceneRef.current.objects.map((o) => o.id === target.id ? object : o)
+        : [...sceneRef.current.objects, object] };
+      if (projectId) await api('PUT', `/api/projects/${projectId}`, { scene: next });
+      commit(next);
       setSelectedId(object.id);
       setJob(null);
       say('ai', 'Motion frames created from the updated robin flight sequence. Each frame has its own wing pose.');
