@@ -4,8 +4,8 @@ import { putJobFile, readAssetRaw, saveAsset } from './assets';
 import { balance, charge, ensureMonthlyGrant, refund } from './credits';
 import { HttpError } from './http';
 import { readKey } from './keys';
-import { MODES, PendingError, TOOLS, stagesFor } from './providers';
-import type { JobKind, Mode, ProviderRegistry, Registry, ServerProvider } from './providers';
+import { ASPECTS, MODES, PendingError, TOOLS, stagesFor } from './providers';
+import type { Aspect, JobKind, Mode, ProviderRegistry, Registry, ServerProvider, StepContext } from './providers';
 import type { D1Database, Env } from './types';
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -28,7 +28,11 @@ export interface JobRow {
 }
 
 const COLUMNS = 'id, user_id, project_id, kind, mode, status, stage, stage_done, error, cost, input, state, attempts, updated_at';
-const KINDS: JobKind[] = ['motion', 'image-gen', 'upscale'];
+const KINDS: JobKind[] = ['motion', 'image-gen', 'upscale', 'design', 'vectorize'];
+/** Tools that work on an existing image and need no prompt. */
+const IMAGE_ONLY: JobKind[] = ['upscale', 'vectorize'];
+/** Design briefs spell out text, colours and layout, so they need more room than a motion prompt. */
+const MAX_DESIGN_PROMPT = 1500;
 
 export const jobView = (j: JobRow) => {
   const state = JSON.parse(j.state) as Record<string, unknown>;
@@ -44,7 +48,7 @@ export const jobView = (j: JobRow) => {
     attempts: j.attempts,
     result:
       j.status === 'complete'
-        ? { plan: state.plan ?? null, videoUrl: state.video ? `/api/jobs/${j.id}/video` : null, assetId: (state.assetId as string | undefined) ?? null }
+        ? { plan: state.plan ?? null, videoUrl: state.video ? `/api/jobs/${j.id}/video` : null, svgUrl: state.svg ? `/api/jobs/${j.id}/svg` : null, assetId: (state.assetId as string | undefined) ?? null }
         : null,
   };
 };
@@ -65,7 +69,7 @@ export function estimate(mode: string, providers: ProviderRegistry) {
 }
 
 export function estimateTools(reg: Registry) {
-  return (['image-gen', 'upscale'] as const).map((kind) => {
+  return (['image-gen', 'upscale', 'design', 'vectorize'] as const).map((kind) => {
     const p = reg.tools[kind];
     return {
       kind,
@@ -102,9 +106,9 @@ export async function createJob(db: D1Database, env: Env, reg: Registry, userId:
   const idem = body.idempotencyKey;
   if (typeof idem !== 'string' || idem.length < 8 || idem.length > 80) throw new HttpError(400, 'An idempotencyKey of 8 to 80 characters is required.');
   if (typeof body.projectId !== 'string') throw new HttpError(400, 'projectId is required.');
-  const promptRaw = typeof body.prompt === 'string' ? sanitizeText(body.prompt) : '';
-  if (!promptRaw && kind !== 'upscale') throw new HttpError(400, 'Describe what you want.');
-  const prompt = promptRaw || 'upscale';
+  const promptRaw = typeof body.prompt === 'string' ? sanitizeText(body.prompt, kind === 'design' ? MAX_DESIGN_PROMPT : undefined) : '';
+  if (!promptRaw && !IMAGE_ONLY.includes(kind)) throw new HttpError(400, 'Describe what you want.');
+  const prompt = promptRaw || kind;
 
   // Same key from the same user returns the same job, never a second charge.
   const existing = await db.prepare(`SELECT ${COLUMNS} FROM jobs WHERE user_id = ? AND idempotency_key = ?`).bind(userId, idem).first<JobRow>();
@@ -159,6 +163,14 @@ export async function createJob(db: D1Database, env: Env, reg: Registry, userId:
   }
 
   const scale = body.scale === 4 ? 4 : 2;
+  const design =
+    kind === 'design'
+      ? {
+          aspect: (ASPECTS.includes(body.aspect as Aspect) ? body.aspect : 'square') as Aspect,
+          transparent: body.transparent === true,
+          title: typeof body.title === 'string' ? sanitizeText(body.title, 40) || undefined : undefined,
+        }
+      : {};
   await ensureMonthlyGrant(db, userId);
   const id = crypto.randomUUID();
   const t = now();
@@ -167,7 +179,7 @@ export async function createJob(db: D1Database, env: Env, reg: Registry, userId:
       `INSERT INTO jobs(id, user_id, project_id, kind, mode, provider_name, status, stage, cost, idempotency_key, input, attempts, created_at, updated_at)
        VALUES(?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, 1, ?, ?)`,
     )
-    .bind(id, userId, body.projectId, kind, mode, provider.id, stagesFor(kind)[0], cost, idem, JSON.stringify({ prompt, keyProvider, assetId, sourceName, scale }), t, t)
+    .bind(id, userId, body.projectId, kind, mode, provider.id, stagesFor(kind)[0], cost, idem, JSON.stringify({ prompt, keyProvider, assetId, sourceName, scale, ...design }), t, t)
     .run();
 
   if (!(await charge(db, userId, cost, `${label}`, `job:${id}:charge`))) {
@@ -192,7 +204,7 @@ export async function runJob(db: D1Database, env: Env, reg: Registry, jobId: str
   let state = JSON.parse(job.state) as Record<string, unknown>;
   try {
     if (!provider) throw new Error('This is not available.');
-    const input = JSON.parse(job.input) as { prompt: string; keyProvider?: string; assetId?: string; sourceName?: string; scale?: number };
+    const input = JSON.parse(job.input) as StepContext['input'];
     if (input.keyProvider) apiKey = (await readKey(db, env.KEY_ENCRYPTION_SECRET, job.user_id, input.keyProvider)) ?? undefined;
     const owner = await db.prepare('SELECT user_id FROM projects WHERE id = ?').bind(job.project_id).first<{ user_id: string }>();
     if (!owner) throw new Error('The project no longer exists.');

@@ -3,6 +3,7 @@ import { planFromIntent, planFromPrompt } from '../../src/ai/localPlanner';
 import type { Intent } from '../../src/ai/localPlanner';
 import { sanitizeText } from '../../src/lib/sanitize';
 import type { ScenePlan } from '../../src/ai/providers';
+import { designAssetId, designFileName } from './openaiImage';
 import type { ServerProvider } from './providers';
 import type { AiBinding } from './types';
 
@@ -137,6 +138,32 @@ export function workersAiImageProvider(ai: AiBinding): ServerProvider {
       if (typeof image !== 'string' || !image) throw new Error('The AI service returned no image.');
       const id = `gen-${crypto.randomUUID().slice(0, 8)}`;
       await ctx.assets.saveAsset(id, `${id}.jpg`, fromBase64(image), false);
+      return { assetId: id };
+    },
+  };
+}
+
+/**
+ * Brand Studio designs with FLUX on Cloudflare's own AI. Always square; lettering is weaker than with
+ * OpenAI or Ideogram, so short brand names work best.
+ */
+export function workersAiDesignProvider(ai: AiBinding): ServerProvider {
+  return {
+    id: 'workers-ai:flux-1-schnell',
+    platformKey: true,
+    async step(stage, ctx) {
+      if (stage !== 'Designing') return;
+      let image: unknown;
+      try {
+        // 8 is the most steps this model allows: slower than plain image generation, but cleaner edges and text.
+        const out = (await ai.run(IMAGE_MODEL, { prompt: ctx.input.prompt.slice(0, 2000), steps: 8 })) as { image?: unknown };
+        image = out.image;
+      } catch {
+        throw new Error('The AI service could not create that design. Try different wording.');
+      }
+      if (typeof image !== 'string' || !image) throw new Error('The AI service returned no image.');
+      const id = designAssetId();
+      await ctx.assets.saveAsset(id, designFileName(ctx.input.title, id, 'jpg'), fromBase64(image), false);
       return { assetId: id };
     },
   };

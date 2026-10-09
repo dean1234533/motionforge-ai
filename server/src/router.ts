@@ -323,7 +323,7 @@ async function route(req: Request, rawEnv: RawEnv, deps: Deps, ctx?: Ctx): Promi
     if (created) ctx?.waitUntil(runJob(db, env, reg, job.id));
     return json({ job: jobView(job), credits: await balance(db, user.id) }, created ? 202 : 200);
   }
-  m = path.match(/^\/api\/jobs\/([0-9a-f-]{36})(?:\/(retry|cancel|video))?$/);
+  m = path.match(/^\/api\/jobs\/([0-9a-f-]{36})(?:\/(retry|cancel|video|svg))?$/);
   if (m) {
     const id = m[1];
     if (!m[2] && method === 'GET') {
@@ -338,6 +338,17 @@ async function route(req: Request, rawEnv: RawEnv, deps: Deps, ctx?: Ctx): Promi
       const v = await getJobFile(env, id, 'video.mp4');
       if (!v) throw new HttpError(404, 'No video.');
       return bin(v.bytes, v.type);
+    }
+    if (m[2] === 'svg' && method === 'GET') {
+      const job = await getJob(db, user.id, id);
+      await projectAccess(db, user.id, job.project_id, 'read');
+      const v = await getJobFile(env, id, 'logo.svg');
+      if (!v) throw new HttpError(404, 'No vector file.');
+      const name = (JSON.parse(job.input) as { sourceName?: string }).sourceName?.replace(/\.[^.]+$/, '').replace(/[^\w.-]/g, '') || 'logo';
+      // A download only: an SVG opened in the page could carry script, so it is never shown inline.
+      const res = bin(v.bytes, 'image/svg+xml');
+      res.headers.set('content-disposition', `attachment; filename="${name}.svg"`);
+      return res;
     }
     if (m[2] === 'retry' && method === 'POST') {
       await retryJob(db, user.id, id);

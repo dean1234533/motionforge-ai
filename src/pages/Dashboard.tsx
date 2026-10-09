@@ -60,7 +60,10 @@ export function Dashboard() {
       <InstallBanner />
       <div className="row between">
         <h1>Your projects</h1>
-        <a className="btn primary" href="#/new">New project</a>
+        <div className="row">
+          <a className="btn" href="#/studio">Brand Studio</a>
+          <a className="btn primary" href="#/new">New project</a>
+        </div>
       </div>
       {error && <p className="error" role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}

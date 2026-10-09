@@ -12,6 +12,7 @@ import { Landing } from './pages/Landing';
 import { NewProject } from './pages/NewProject';
 import { Settings } from './pages/Settings';
 import { Share } from './pages/Share';
+import { Studio } from './pages/Studio';
 
 export function useRoute(): { path: string; params: URLSearchParams } {
   const read = () => {
@@ -63,6 +64,8 @@ export function App() {
       return <RequireAuth><Dashboard /></RequireAuth>;
     case '/new':
       return <RequireAuth><NewProject /></RequireAuth>;
+    case '/studio':
+      return <RequireAuth><Studio /></RequireAuth>;
     case '/teams':
       return <RequireAuth><Teams /></RequireAuth>;
     case '/settings':

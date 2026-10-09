@@ -39,7 +39,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # wrangler dev, which this job runs the Worker with, needs Node 22 or later.
+          node-version: 22
       - run: npm install
       - run: npx playwright install --with-deps chromium
       - run: npm run build
