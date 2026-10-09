@@ -271,6 +271,25 @@ describe('Replicate provider (mocked HTTP; not verified against the live service
     expect((await app.call('GET', `/api/jobs/${id}`, undefined, app.u.cookie)).body.job.status).toBe('complete');
   });
 
+  it('deleting a project also deletes its images, frames and generated videos', async () => {
+    const { fetchFn } = mockReplicate();
+    const app = await withAsset(fetchFn);
+    await app.call('PUT', `/api/projects/${app.projectId}/assets/bird-1/frames`, ['data:image/webp;base64,AAAA'], app.u.cookie);
+    const id = (await app.call('POST', '/api/jobs', body(app.projectId, 'idem-rep-del'), app.u.cookie)).body.job.id;
+    await app.settle();
+    await app.resume();
+    await app.resume();
+    expect((await app.call('GET', `/api/jobs/${id}`, undefined, app.u.cookie)).body.job.status).toBe('complete');
+    const before = [...app.files.store.keys()];
+    expect(before).toHaveLength(3);
+    expect(before).toEqual(expect.arrayContaining([`jobs/${id}/video.mp4`, expect.stringMatching(/\/a\/bird-1$/), expect.stringMatching(/\/a\/bird-1\.frames\.json$/)]));
+
+    expect((await app.call('DELETE', `/api/projects/${app.projectId}`, undefined, app.u.cookie)).status).toBe(200);
+    expect([...app.files.store.keys()]).toEqual([]);
+    expect(app.sqlite.prepare('SELECT COUNT(*) AS n FROM assets').get()).toEqual({ n: 0 });
+    expect(app.sqlite.prepare('SELECT COUNT(*) AS n FROM jobs').get()).toEqual({ n: 0 });
+  });
+
   it('fails cleanly when the provider fails, and does not charge again on retry', async () => {
     const { fetchFn } = mockReplicate({ status: 'failed', error: 'NSFW' });
     const app = await withAsset(fetchFn);

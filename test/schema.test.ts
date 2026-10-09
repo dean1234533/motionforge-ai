@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { MIGRATIONS } from '../server/src/migrations';
 import { ensureSchema } from '../server/src/schema';
-import { makeApp } from './server/harness';
+import { sweepOrphanFiles } from '../server/src/d1files';
+import { makeApp, sqliteD1 } from './server/harness';
 
 const tables = (app: ReturnType<typeof makeApp>) =>
   (app.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[]).map((t) => t.name);
@@ -38,5 +39,20 @@ describe('self-applying migrations', () => {
     expect((await app.call('GET', '/api/me', undefined, u.cookie)).status).toBe(200);
     const r = await app.call('PUT', '/api/keys/openai', { apiKey: 'sk-abcdefgh1234' }, u.cookie);
     expect(r.status).toBe(200);
+  });
+
+  it('clears out stored files left behind by projects deleted before files were cleaned up', async () => {
+    const app = makeApp({}, { FILES: undefined } as never); // files kept in the database
+    const u = await app.user();
+    const pid = (await app.call('POST', '/api/projects', { name: 'Old' }, u.cookie)).body.project.id as string;
+    const keep = (await app.call('POST', '/api/projects', { name: 'Keep' }, u.cookie)).body.project.id as string;
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 1, 2, 3, 4]);
+    for (const p of [pid, keep]) expect((await app.raw('PUT', `/api/projects/${p}/assets/bird-1`, png, u.cookie)).status).toBe(201);
+    app.sqlite.prepare('INSERT INTO file_chunks(key, idx, type, data) VALUES(?, 0, NULL, ?)').run('jobs/00000000-0000-0000-0000-000000000000/video.mp4', 'AAAA');
+    app.sqlite.prepare('DELETE FROM projects WHERE id = ?').run(pid); // the old way: files stayed behind
+
+    expect(await sweepOrphanFiles(sqliteD1(app.sqlite))).toBe(2);
+    const left = app.sqlite.prepare('SELECT key FROM file_chunks').all() as { key: string }[];
+    expect(left.map((r) => r.key)).toEqual([expect.stringContaining(`/p/${keep}/a/bird-1`)]);
   });
 });

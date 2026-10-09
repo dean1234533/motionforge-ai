@@ -19,7 +19,7 @@ export function sniffImage(b: Uint8Array): string | null {
 
 // Files live under the project creator, so teammates and the creator see the same files.
 export const assetKey = (ownerId: string, projectId: string, assetId: string) => `u/${ownerId}/p/${projectId}/a/${assetId}`;
-const framesKey = (ownerId: string, projectId: string, assetId: string) => `${assetKey(ownerId, projectId, assetId)}.frames.json`;
+export const framesKey = (ownerId: string, projectId: string, assetId: string) => `${assetKey(ownerId, projectId, assetId)}.frames.json`;
 
 export function assertAssetId(id: string): void {
   if (!ID.test(id)) throw new HttpError(400, 'Invalid asset id.');
