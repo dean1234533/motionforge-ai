@@ -188,7 +188,7 @@ function download(name: string, data: BlobPart, type: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function Editor({ initialPrompt, projectId }: { initialPrompt: string; projectId?: string }) {
+export function Editor({ initialPrompt, projectId, autoBird = false }: { initialPrompt: string; projectId?: string; autoBird?: boolean }) {
   const history = useHistory<Scene>(emptyScene());
   const scene = history.state;
   const sceneRef = useRef(scene);
@@ -216,6 +216,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
   const fileRef = useRef<HTMLInputElement>(null);
   const replaceRef = useRef<HTMLInputElement>(null);
   const replaceTarget = useRef<string | null>(null);
+  const starterLoaded = useRef(false);
 
   const sel: SceneObject | null = scene.objects.find((o) => o.id === selectedId) ?? scene.objects[0] ?? null;
   const providers = getProviders(mode);
@@ -502,41 +503,28 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     }
   };
 
-  const useSample = async () => {
-    try {
-      const res = await fetch(`${import.meta.env.BASE_URL}sample-bird.svg`);
-      const blob = await res.blob();
-      const data = await new Promise<string>((resolve, reject) => {
-        const fr = new FileReader();
-        fr.onload = () => resolve(String(fr.result));
-        fr.onerror = () => reject(new Error('Could not load the sample bird.'));
-        fr.readAsDataURL(blob);
-      });
-      await runBuild(data, 'sample-bird.png');
-    } catch (e) {
-      setNotice(e instanceof Error ? e.message : 'Could not load the sample bird.');
-    }
-  };
+  const useSample = async () => { await useBirdFlight('sample-bird', false); };
 
-  const useBirdFlight = async () => {
+  const useBirdFlight = async (name = 'Robin flight', replaceSelected = true) => {
     try {
       setJob({ stage: 'Processing frames' });
       const frames = await birdFlightFrames();
       const assetId = uid('bird-flight');
-      const asset: Asset = { id: assetId, name: 'Robin flight', source: frames[0], frames, sequence: 'bird-flight' };
+      const asset: Asset = { id: assetId, name, source: frames[0], frames, sequence: 'bird-flight' };
       if (projectId) {
         await uploadBinary(`/api/projects/${projectId}/assets/${assetId}?name=Robin%20flight`, await toUploadBlob(frames[0]));
         await api('PUT', `/api/projects/${projectId}/assets/${assetId}/frames`, frames);
       }
-      const object = sel?.kind === 'image' ? { ...sel, assetId, name: 'Robin flight', flapsPerScroll: 8, widthPct: Math.min(100, sel.widthPct * (sel.name === 'Robin flight' ? 1 : 1.5)) }
-        : { ...newObject(uid('robin'), assetId, 'Robin flight'), flapsPerScroll: 8, widthPct: 33 };
+      const replacing = replaceSelected && sel?.kind === 'image';
+      const object = replacing ? { ...sel!, assetId, name, flapsPerScroll: 8, widthPct: Math.min(100, sel!.widthPct * (sel!.name === 'Robin flight' ? 1 : 1.5)) }
+        : { ...newObject(uid('robin'), assetId, name), flapsPerScroll: 8, widthPct: 33, path: [{ progress: 0, x: 50, y: 80 }, { progress: 0.5, x: 32.6, y: 56 }, { progress: 1, x: 56.6, y: 31.7 }] };
       setAssets((prev) => [...prev, asset]);
-      commit({ ...sceneRef.current, objects: sel?.kind === 'image'
+      commit({ ...sceneRef.current, objects: replacing
         ? sceneRef.current.objects.map((o) => o.id === sel.id ? object : o)
         : [...sceneRef.current.objects, object] });
       setSelectedId(object.id);
       setJob(null);
-      say('ai', 'Loaded a generated robin flight sequence. Each frame has its own wing pose.');
+      say('ai', 'Motion frames created from the updated robin flight sequence. Each frame has its own wing pose.');
     } catch (e) {
       setJob(null);
       setNotice(e instanceof Error ? e.message : 'Could not load the bird flight.');
@@ -551,6 +539,13 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
   };
 
   // ---- layers ------------------------------------------------------------
+  // Homepage creation links start with the same prepared bird as the editor sample buttons.
+  useEffect(() => {
+    if (restoring || !autoBird || starterLoaded.current || scene.objects.length || assets.length) return;
+    starterLoaded.current = true;
+    void useBirdFlight();
+  }, [restoring, autoBird]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const addLayerFor = (a: Asset) => {
     const obj = newObject(uid(a.name), a.id, a.name.replace(/\.[^.]+$/, '').slice(0, 40) || 'Layer');
     commit({ ...scene, objects: [...scene.objects, obj] });
@@ -1057,7 +1052,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
           <div className="row">
             <button type="button" className="btn" onClick={() => fileRef.current?.click()}>Upload image</button>
             <button type="button" className="btn ghost" onClick={useSample}>Use sample bird</button>
-            <button type="button" className="btn ghost" onClick={useBirdFlight}>Use robin flight sequence</button>
+            <button type="button" className="btn ghost" onClick={() => void useBirdFlight()}>Use robin flight sequence</button>
           </div>
           <input ref={fileRef} type="file" hidden accept="image/png,image/jpeg,image/webp" onChange={(e) => { void onFiles(e.target.files); e.target.value = ''; }} />
           <input ref={replaceRef} type="file" hidden accept="image/png,image/jpeg,image/webp" onChange={(e) => { void onFiles(e.target.files, replaceTarget.current ?? undefined); e.target.value = ''; }} />

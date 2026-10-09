@@ -53,7 +53,7 @@ export function App() {
   if (cloud) return <RequireAuth><Editor key={cloud[1]} initialPrompt={params.get('prompt') ?? ''} projectId={cloud[1]} /></RequireAuth>;
   switch (path) {
     case '/editor':
-      return <Editor initialPrompt={params.get('prompt') ?? ''} />;
+      return <Editor initialPrompt={params.get('prompt') ?? ''} autoBird={params.get('auto') === 'robin'} />;
     case '/login':
       return <Auth mode="login" />;
     case '/signup':

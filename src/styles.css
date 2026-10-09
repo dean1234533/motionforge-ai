@@ -545,3 +545,8 @@ details[open] { border-color: #3b4766; }
   .hero-art img, .scroll-cue i::after, .work-orbit .visual-shape i, .effect-cloud i { animation: none!important; }
   .studio-shell { transform: none!important; }
 }
+
+@media (max-width: 600px) {
+  .landing-v2 .nav-cta { min-height: 44px; }
+  .landing-v2 .studio-prompt button { width: 44px; height: 44px; }
+}
