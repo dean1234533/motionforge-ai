@@ -1,6 +1,6 @@
 import { detectKey, keyImageData } from './chromaKey';
 import type { KeyColor } from './chromaKey';
-import { FRAME_COUNT, encodeCanvas, localBackgroundRemover } from './imagePipeline';
+import { FRAME_COUNT, encodeCanvas, loadImage, localBackgroundRemover } from './imagePipeline';
 
 /** Resolves once the video has moved to `t`. Never hangs: some browsers skip 'seeked' for a no-op seek. */
 function seek(video: HTMLVideoElement, t: number): Promise<void> {
@@ -132,4 +132,30 @@ async function framesFrom(url: string, count: number, maxSide: number, key: KeyC
   });
   if (count > 1 && new Set(encoded).size === 1) throw new Error('The provider returned a still image instead of an action. Generate the motion again.');
   return encoded;
+}
+
+/** What the server accepts for one layer's frames (12 MB), less room for the request's JSON. */
+export const MAX_FRAMES_CHARS = 11_500_000;
+
+async function rescale(src: string, k: number): Promise<string> {
+  const img = await loadImage(src);
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(img.naturalWidth * k));
+  c.height = Math.max(1, Math.round(img.naturalHeight * k));
+  c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+  return encodeCanvas(c);
+}
+
+/**
+ * Makes a frame sequence small enough to save. Safari cannot encode WebP, so its frames come out as
+ * much larger PNGs; first keep every other frame (down to 48), then shrink the frames.
+ */
+export async function fitFrames(frames: string[], maxChars = MAX_FRAMES_CHARS): Promise<string[]> {
+  const size = (f: string[]) => f.reduce((n, s) => n + s.length + 3, 2);
+  let out = frames;
+  for (let tries = 0; size(out) > maxChars; tries++) {
+    if (tries >= 8) throw new Error('This action is too large to save. Generate it again with a smaller image.');
+    out = out.length > 48 ? out.filter((_, i) => i % 2 === 0) : await Promise.all(out.map((f) => rescale(f, 0.8)));
+  }
+  return out;
 }
