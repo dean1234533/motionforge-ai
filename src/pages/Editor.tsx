@@ -14,7 +14,7 @@ import { sanitizeFilename, sanitizeText, slug, validateUpload } from '../lib/san
 import { EFFECT_LABELS, emptyScene, newEffect, newLine, newObject, newShape } from '../scene/defaults';
 import { EASINGS, EFFECT_TYPES, parseScene } from '../scene/schema';
 import type { EffectSettings, EffectType, Keyframe, LineSettings, Scene, SceneObject, ShapeSettings } from '../scene/schema';
-import { extractFrames } from '../ai/videoFrames';
+import { extractFrames, fitFrames } from '../ai/videoFrames';
 import { chromaScreenBlob, toUploadBlob } from '../ai/imagePipeline';
 import type { KeyColor } from '../ai/chromaKey';
 import { api, uploadBinary, when } from '../lib/api';
@@ -725,9 +725,12 @@ export function Editor({ initialPrompt, projectId, autoBird = false }: { initial
       }
       const original = assets.find((a) => a.id === candidate.assetId);
       if (!original) throw new Error('The original image is no longer available.');
+      setNotice('Saving the action…');
+      const frames = await fitFrames(candidate.frames);
       await uploadBinary(`/api/projects/${projectId}/assets/${candidate.generatedAssetId}?name=${encodeURIComponent(`${original.name} action`)}`, await toUploadBlob(original.source));
-      await api('PUT', `/api/projects/${projectId}/assets/${candidate.generatedAssetId}/frames`, candidate.frames);
-      setAssets((prev) => [...prev.filter((a) => a.id !== candidate.generatedAssetId), { ...original, id: candidate.generatedAssetId, name: `${original.name} action`, frames: candidate.frames, sequence: undefined }]);
+      await api('PUT', `/api/projects/${projectId}/assets/${candidate.generatedAssetId}/frames`, frames);
+      setNotice('');
+      setAssets((prev) => [...prev.filter((a) => a.id !== candidate.generatedAssetId), { ...original, id: candidate.generatedAssetId, name: `${original.name} action`, frames, sequence: undefined }]);
       const cur = sceneRef.current;
       commit({ ...cur, objects: cur.objects.map((o) => o.id === candidate.targetId ? { ...o, ...candidate.patch, assetId: candidate.generatedAssetId } : o), scroll: { ...cur.scroll, length: candidate.scrollLength ?? cur.scroll.length } });
       setMotionReview(null);
