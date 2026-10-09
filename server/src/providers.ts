@@ -65,6 +65,8 @@ export interface ServerProvider {
   needsImage?: boolean;
   /** True when the server owns a key for this provider, so credits can pay for it. */
   platformKey?: boolean;
+  /** Can generate new subject poses, rather than only plan a scroll path. */
+  generatesMotion?: boolean;
   step(stage: string, ctx: StepContext): Promise<Record<string, unknown> | void>;
 }
 

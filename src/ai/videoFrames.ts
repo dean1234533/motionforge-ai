@@ -94,13 +94,18 @@ export async function extractFrames(url: string, count = FRAME_COUNT, maxSide = 
     }
   }
   if (x1 < 0) throw new Error('No subject was found in the generated video.');
+  if (x0 <= 1 || y0 <= 1 || x1 >= w - 2 || y1 >= h - 2) {
+    throw new Error('The generated subject reaches the edge of the video and may be clipped. Generate again with more room around its full movement.');
+  }
   const cw = x1 - x0 + 1;
   const ch = y1 - y0 + 1;
-  return frames.map((c) => {
+  const encoded = frames.map((c) => {
     const out = document.createElement('canvas');
     out.width = cw;
     out.height = ch;
     out.getContext('2d')!.drawImage(c, x0, y0, cw, ch, 0, 0, cw, ch);
     return encodeCanvas(out);
   });
+  if (count > 1 && new Set(encoded).size === 1) throw new Error('The provider returned a still image instead of an action. Generate the motion again.');
+  return encoded;
 }

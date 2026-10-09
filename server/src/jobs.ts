@@ -58,6 +58,7 @@ export function estimate(mode: string, providers: ProviderRegistry) {
     cost: MODES[m].cost,
     provider: provider?.id ?? null,
     available: Boolean(provider),
+    generatesMotion: Boolean(provider?.generatesMotion),
     note: provider ? undefined : 'This mode is not available yet.',
   };
 }
@@ -131,6 +132,9 @@ export async function createJob(db: D1Database, env: Env, reg: Registry, userId:
     if (useOwnKey) mode = 'byok';
   }
   if (!provider) throw new HttpError(501, `${label} is not available yet.`);
+  if (kind === 'motion' && body.realistic === true && !provider.generatesMotion) {
+    throw new HttpError(400, 'Realistic subject actions require an image-to-video provider. Choose Fast, Professional or bring your own Replicate key.');
+  }
   if (!useOwnKey && kind !== 'motion' && !provider.platformKey) {
     throw new HttpError(400, `${label} is not paid for by this server. Connect your own key in Settings and choose “use my own key”.`);
   }

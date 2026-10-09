@@ -80,7 +80,7 @@
       opacity: clamp(sampleArray(obj.opacity, t), 0, 1),
       blur: Math.max(0, sampleArray(obj.blur || [0], t)),
       t: t,
-      phase: raw * (obj.flapsPerScroll || 0),
+      phase: raw * (obj.motion ? obj.motion.cycles : (obj.flapsPerScroll || 0)),
       cycle: obj.effect ? raw * obj.effect.loops : 0
     };
   }
@@ -284,6 +284,12 @@
     return d;
   }
 
+  function sampleFrameIndex(phase, count, playback) {
+    if (count <= 1) return 0;
+    var frame = playback === 'once' ? clamp(phase, 0, 1) * (count - 1) : frac(phase) * count;
+    return Math.round(frame) % count;
+  }
+
   function mount(host, config, options) {
     options = options || {};
     var scene = config.scene;
@@ -460,7 +466,9 @@
     function onScroll() {
       if (reduced) return;
       var p = readProgress();
-      if (!scene.scroll.reverse) { p = Math.max(p, maxSeen); maxSeen = p; }
+      // Editing must allow rewinding, even when the exported scene is configured
+      // for forward-only playback. Otherwise a path edit remains stuck at its end.
+      if (!options.preview && !scene.scroll.reverse) { p = Math.max(p, maxSeen); maxSeen = p; }
       target = p;
       requestDraw();
     }
@@ -508,9 +516,11 @@
         var frames = imgs[obj.assetId];
         if (!frames || !frames.length) continue;
         var n = frames.length;
-        var f = frac(reduced ? 0 : st.phase) * n;
-        var idx = Math.floor(f) % n, fr = f - Math.floor(f);
-        var a = frames[idx], b = frames[(idx + 1) % n];
+        var phase = reduced ? 0 : st.phase;
+        // Use one pose per frame: alpha-over blending leaves a second wing
+        // silhouette visible throughout a stroke, especially on transparent assets.
+        var idx = sampleFrameIndex(phase, n, obj.motion && obj.motion.playback);
+        var a = frames[idx];
         if (!a.complete || !a.naturalWidth) continue;
         var dw = w * obj.widthPct / 100 * st.scale * (mobile ? obj.mobileScale : 1);
         var dh = dw * a.naturalHeight / a.naturalWidth;
@@ -520,10 +530,6 @@
         ctx.globalAlpha = st.opacity;
         if (canBlur) ctx.filter = st.blur > 0 ? 'blur(' + st.blur + 'px)' : 'none';
         ctx.drawImage(a, -dw / 2, -dh / 2, dw, dh);
-        if (n > 1 && fr > 0.001 && b.complete && b.naturalWidth) {
-          ctx.globalAlpha = st.opacity * fr;
-          ctx.drawImage(b, -dw / 2, -dh / 2, dw, dh);
-        }
         ctx.restore();
       }
       if (effectsMode === 'webgl') {
@@ -566,7 +572,7 @@
   }
 
   g.MotionForge = {
-    mount: mount, evaluate: evaluate, samplePath: samplePath, sampleArray: sampleArray, easings: easings,
+    mount: mount, evaluate: evaluate, samplePath: samplePath, sampleArray: sampleArray, sampleFrameIndex: sampleFrameIndex, easings: easings,
     computeParticles: computeParticles, chooseRenderer: chooseRenderer
   };
 })(typeof window !== 'undefined' ? window : globalThis);

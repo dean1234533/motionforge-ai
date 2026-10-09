@@ -162,8 +162,8 @@ export interface BuiltAsset {
   bytes: number;
 }
 
-/** `maxSide` is 512 normally and 1024 for upscaled (HD) images. */
-export async function buildAsset(source: string, onStage: (s: Stage) => void, maxSide = MAX_SIDE): Promise<BuiltAsset> {
+/** Prepare an intact still. Subject actions need image-to-video, not a generic image warp. */
+export async function buildAsset(source: string, onStage: (s: Stage) => void, maxSide = MAX_SIDE, simulateWings = false): Promise<BuiltAsset> {
   onStage('Preparing image');
   const img = await loadImage(source);
   const raw = toCanvas(img, maxSide);
@@ -174,8 +174,7 @@ export async function buildAsset(source: string, onStage: (s: Stage) => void, ma
   const base = trim(removed.canvas);
   await yieldUI();
 
-  onStage('Generating motion');
-  const canvases = await localMotionFrames.generate(base, FRAME_COUNT);
+  const canvases = simulateWings ? await localMotionFrames.generate(base, FRAME_COUNT) : [base];
   await yieldUI();
 
   onStage('Processing frames');

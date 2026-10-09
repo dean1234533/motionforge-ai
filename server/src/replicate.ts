@@ -1,8 +1,9 @@
 import { openaiImageProvider } from './openaiImage';
-import { PendingError, localRulesProvider } from './providers';
+import { PendingError } from './providers';
 import type { ProviderRegistry, ServerProvider, ToolRegistry } from './providers';
 import type { Env } from './types';
 import { workersAiImageProvider, workersAiPlannerProvider } from './workersAi';
+import { actionPlan, actionVideoPrompt } from '../../src/ai/actionMotion';
 
 const API = 'https://api.replicate.com/v1';
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
@@ -147,8 +148,9 @@ export function replicateProvider(cfg: ReplicateConfig): ServerProvider {
     keyProviders: ['replicate'],
     needsImage: true,
     platformKey: Boolean(cfg.token),
+    generatesMotion: true,
     async step(stage, ctx) {
-      if (stage === 'Analysing prompt') return localRulesProvider.step(stage, ctx);
+      if (stage === 'Analysing prompt') return { plan: actionPlan(ctx.input.prompt) };
 
       if (stage === 'Generating motion') {
         const token = ctx.apiKey ?? cfg.token;
@@ -161,7 +163,8 @@ export function replicateProvider(cfg: ReplicateConfig): ServerProvider {
           if (!asset) throw new Error('The source image could not be found.');
           const model = await resolveModel(cfg, token);
           const input: Record<string, unknown> = { [model.imageField]: toDataUri(asset.bytes, asset.type) };
-          if (model.promptField) input[model.promptField] = ctx.input.prompt;
+          if (!model.promptField) throw new Error('This model cannot accept action instructions. Choose a prompt-controlled image-to-video model.');
+          input[model.promptField] = actionVideoPrompt(ctx.input.prompt);
           if (model.duration !== undefined) input.duration = model.duration;
           if (model.cameraFixed) input.camera_fixed = true;
           throw new PendingError({ predictionId: await startPrediction(cfg, headers, model.version, input) });

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { applyEditCommand } from '../ai/commands';
-import { buildAsset, loadImage, readFileAsDataUrl } from '../ai/imagePipeline';
+import { buildAsset, encodeCanvas, loadImage, readFileAsDataUrl } from '../ai/imagePipeline';
+import { cleanFlightFrame, flightFrameCrop } from '../ai/flightFrame';
+import { isSubjectAction, requiresActionFrames } from '../ai/actionMotion';
 import type { Stage } from '../ai/imagePipeline';
 import { PROVIDER_SETS, getProviders } from '../ai/registry';
 import type { GenerationMode } from '../ai/providers';
@@ -25,6 +27,17 @@ interface Asset {
   frames: string[];
   /** Upscaled images get higher-resolution frames. */
   hd?: boolean;
+  sequence?: 'bird-flight';
+}
+
+interface MotionReview {
+  generatedAssetId: string;
+  targetId: string;
+  assetId: string;
+  frames: string[];
+  patch: Partial<SceneObject>;
+  scrollLength?: number;
+  prompt: string;
 }
 
 interface ToolInfo {
@@ -40,7 +53,7 @@ interface ToolInfo {
 interface Saved {
   v: 1;
   scene: Scene;
-  assets: { id: string; name: string; source: string }[];
+  assets: { id: string; name: string; source: string; sequence?: 'bird-flight' }[];
   selectedId: string | null;
 }
 
@@ -103,6 +116,7 @@ interface ModeInfo {
   label: string;
   cost: number;
   provider: string | null;
+  generatesMotion?: boolean;
   available: boolean;
 }
 
@@ -118,6 +132,52 @@ const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 const uid = (name: string) => `${slug(name, 'layer')}-${Math.random().toString(36).slice(2, 6)}`;
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const three = (a: number[]) => [0, 0.5, 1].map((t) => window.MotionForge.sampleArray(a, t));
+const FLIGHT_ROUTES: Record<string, Keyframe[]> = {
+  right: [{ progress: 0, x: 20, y: 50 }, { progress: 1, x: 80, y: 50 }],
+  left: [{ progress: 0, x: 80, y: 50 }, { progress: 1, x: 20, y: 50 }],
+  up: [{ progress: 0, x: 50, y: 80 }, { progress: 1, x: 50, y: 20 }],
+  down: [{ progress: 0, x: 50, y: 20 }, { progress: 1, x: 50, y: 80 }],
+  return: [{ progress: 0, x: 50, y: 80 }, { progress: 0.5, x: 50, y: 20 }, { progress: 1, x: 50, y: 80 }],
+};
+
+async function birdFlightFrames(): Promise<string[]> {
+  const sheet = await loadImage(`${import.meta.env.BASE_URL}bird-flight.png`);
+  const frames: string[] = [];
+  for (let i = 0; i < 16; i++) {
+    const crop = flightFrameCrop(sheet.naturalWidth, sheet.naturalHeight, i);
+    const { width, height } = crop;
+    const cell = document.createElement('canvas');
+    cell.width = width;
+    cell.height = height;
+    const ctx = cell.getContext('2d')!;
+    // Drawing the sheet at an offset supplies transparent padding at its outer
+    // edges while recovering wing tips beyond an internal grid boundary.
+    ctx.drawImage(sheet, -crop.x, -crop.y);
+    // Align the orange breast rather than the wing bounds, which change every
+    // frame. This keeps the torso steady throughout the generated wingbeat.
+    const image = ctx.getImageData(0, 0, width, height);
+    cleanFlightFrame(image.data, width, height);
+    ctx.putImageData(image, 0, 0);
+    const pixels = image.data;
+    let sx = 0, sy = 0, weight = 0;
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      const p = (y * width + x) * 4;
+      const r = pixels[p], g = pixels[p + 1], b = pixels[p + 2];
+      if (pixels[p + 3] > 128 && r > 100 && g > 45 && r > g * 1.5 && g > b * 1.5) {
+        const w = r - b;
+        sx += x * w; sy += y * w; weight += w;
+      }
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 768;
+    const scaleX = 512 / crop.cellWidth, scaleY = 512 / crop.cellHeight;
+    const dx = weight ? 768 * 0.65 - (sx / weight) * scaleX : 128;
+    const dy = weight ? 768 * 0.55 - (sy / weight) * scaleY : 128;
+    canvas.getContext('2d')!.drawImage(cell, dx, dy, width * scaleX, height * scaleY);
+    frames.push(encodeCanvas(canvas));
+  }
+  return frames;
+}
 
 function download(name: string, data: BlobPart, type: string) {
   const url = URL.createObjectURL(new Blob([data], { type }));
@@ -141,6 +201,8 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
   const [view, setView] = useState<'edit' | 'export'>('edit');
   const [mode, setMode] = useState<GenerationMode>('free');
   const [job, setJob] = useState<Job>(null);
+  const [motionReview, setMotionReview] = useState<MotionReview | null>(null);
+  const activeMotionPrompt = useRef('');
   const [notice, setNotice] = useState('');
   const [prompt, setPrompt] = useState(initialPrompt);
   const [log, setLog] = useState<LogLine[]>([]);
@@ -261,6 +323,10 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
         if (saved.v !== 1 || !parsed.ok || !Array.isArray(saved.assets)) return;
         const rebuilt: Asset[] = [];
         for (const a of saved.assets) {
+          if (a.sequence === 'bird-flight') {
+            rebuilt.push({ ...a, frames: await birdFlightFrames() });
+            continue;
+          }
           const built = await buildAsset(a.source, () => undefined);
           rebuilt.push({ ...a, frames: built.frames });
         }
@@ -298,7 +364,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
         const data: Saved = {
           v: 1,
           scene,
-          assets: assets.map(({ id, name, source }) => ({ id, name, source })),
+          assets: assets.map(({ id, name, source, sequence }) => ({ id, name, source, sequence })),
           selectedId,
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -330,16 +396,24 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
 
   // ---- preview bridge ----------------------------------------------------
   const framesMap = useMemo(() => Object.fromEntries(assets.map((a) => [a.id, a.frames])), [assets]);
+  const previewFrames = useMemo(() => motionReview ? { ...framesMap, [motionReview.generatedAssetId]: motionReview.frames } : framesMap, [framesMap, motionReview]);
+  const previewScene = useMemo(() => motionReview ? {
+    ...scene,
+    objects: scene.objects.map((o) => o.id === motionReview.targetId ? { ...o, ...motionReview.patch, assetId: motionReview.generatedAssetId } : o),
+    scroll: { ...scene.scroll, length: motionReview.scrollLength ?? scene.scroll.length },
+  } : scene, [scene, motionReview]);
+  const previewSceneRef = useRef(previewScene);
+  previewSceneRef.current = previewScene;
   const previewHtml = useMemo(
-    () => buildPreviewHtml({ scene: sceneRef.current, assets: framesMap }),
-    [framesMap],
+    () => buildPreviewHtml({ scene: previewSceneRef.current, assets: previewFrames }),
+    [previewFrames],
   );
 
   const post = useCallback((msg: unknown) => iframeRef.current?.contentWindow?.postMessage(msg, '*'), []);
 
   useEffect(() => {
-    post({ type: 'mf-scene', scene });
-  }, [scene, post]);
+    post({ type: 'mf-scene', scene: previewScene });
+  }, [previewScene, post]);
 
   useEffect(() => {
     const on = (e: MessageEvent) => {
@@ -352,7 +426,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
   }, []);
 
   const scrub = useCallback(
-    (p: number) => post({ type: 'mf-scroll', y: p * sceneRef.current.scroll.length }),
+    (p: number) => post({ type: 'mf-scroll', y: p * previewSceneRef.current.scroll.length }),
     [post],
   );
 
@@ -444,6 +518,31 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     }
   };
 
+  const useBirdFlight = async () => {
+    try {
+      setJob({ stage: 'Processing frames' });
+      const frames = await birdFlightFrames();
+      const assetId = uid('bird-flight');
+      const asset: Asset = { id: assetId, name: 'Robin flight', source: frames[0], frames, sequence: 'bird-flight' };
+      if (projectId) {
+        await uploadBinary(`/api/projects/${projectId}/assets/${assetId}?name=Robin%20flight`, await toUploadBlob(frames[0]));
+        await api('PUT', `/api/projects/${projectId}/assets/${assetId}/frames`, frames);
+      }
+      const object = sel?.kind === 'image' ? { ...sel, assetId, name: 'Robin flight', flapsPerScroll: 8, widthPct: Math.min(100, sel.widthPct * (sel.name === 'Robin flight' ? 1 : 1.5)) }
+        : { ...newObject(uid('robin'), assetId, 'Robin flight'), flapsPerScroll: 8, widthPct: 33 };
+      setAssets((prev) => [...prev, asset]);
+      commit({ ...sceneRef.current, objects: sel?.kind === 'image'
+        ? sceneRef.current.objects.map((o) => o.id === sel.id ? object : o)
+        : [...sceneRef.current.objects, object] });
+      setSelectedId(object.id);
+      setJob(null);
+      say('ai', 'Loaded a generated robin flight sequence. Each frame has its own wing pose.');
+    } catch (e) {
+      setJob(null);
+      setNotice(e instanceof Error ? e.message : 'Could not load the bird flight.');
+    }
+  };
+
   const deleteAsset = (a: Asset) => {
     if (!window.confirm(`Delete "${a.name}" and any layers that use it?`)) return;
     setAssets((prev) => prev.filter((x) => x.id !== a.id));
@@ -514,7 +613,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     setPrompt('');
     const targetId = sel?.id ?? null;
     const edit = applyEditCommand(text, scene, targetId);
-    if (edit) {
+    if (edit && !isSubjectAction(text)) {
       if (edit.scene !== scene) commit(edit.scene);
       say('ai', edit.message);
       if (edit.action) await runTool('image-gen', { prompt: edit.action.prompt, behind: edit.action.behind });
@@ -522,6 +621,21 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     }
     if (!sel) {
       say('ai', 'Upload an image or use the sample bird first, then describe how it should move.');
+      return;
+    }
+    if (requiresActionFrames(text)) {
+      if (sel.kind !== 'image') {
+        say('ai', 'Select an uploaded or generated image layer to animate its subject.');
+        return;
+      }
+      const actionMode = chooseActionMode();
+      if (!projectId || !actionMode) {
+        say('ai', !projectId
+          ? 'Realistic actions need an online project and Replicate image-to-video. Open a saved project to generate the action. This local editor can adjust positions, but it cannot generate new poses.'
+          : 'Connect Replicate in Settings or enable a video generation mode to generate this action. Your image has been kept intact; no simulated action was applied.');
+        return;
+      }
+      await runPaid(text, sel, actionMode);
       return;
     }
     const problem = modeProblem(mode);
@@ -578,22 +692,51 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
   const applyServerResult = async (job: ServerJob, target: SceneObject) => {
     const plan = job.result?.plan;
     const videoUrl = job.result?.videoUrl;
+    if (videoUrl) {
+      setJob({ stage: 'Processing frames' });
+      const frames = await extractFrames(videoUrl, 96, 512, chroma.current?.key ?? 'auto');
+      setMotionReview({
+        generatedAssetId: `motion-${crypto.randomUUID().slice(0, 8)}`,
+        targetId: target.id,
+        assetId: target.assetId,
+        frames,
+        patch: { ...plan?.patch, flapsPerScroll: 0, motion: plan?.patch.motion ?? { playback: 'once', cycles: 1 } },
+        scrollLength: plan?.scrollLength,
+        prompt: activeMotionPrompt.current,
+      });
+      stop();
+      scrub(0);
+      return;
+    }
     if (plan) {
       const cur = sceneRef.current;
       const patch = { ...plan.patch };
-      // A generated clip already contains several wing beats, so play it a few times, not 14.
-      if (videoUrl && patch.flapsPerScroll) patch.flapsPerScroll = Math.max(1, Math.round(patch.flapsPerScroll / 6));
       commit({
         ...cur,
         objects: cur.objects.map((o) => (o.id === target.id ? { ...o, ...patch } : o)),
         scroll: { ...cur.scroll, length: plan.scrollLength ?? cur.scroll.length },
       });
     }
-    if (videoUrl) {
-      setJob({ stage: 'Processing frames' });
-      const frames = await extractFrames(videoUrl, 24, 512, chroma.current?.key ?? 'auto');
-      setAssets((prev) => prev.map((a) => (a.id === target.assetId ? { ...a, frames } : a)));
-      await api('PUT', `/api/projects/${projectId}/assets/${target.assetId}/frames`, frames);
+  };
+
+  const acceptMotion = async () => {
+    if (!motionReview || !projectId) return;
+    try {
+      const candidate = motionReview;
+      if (!sceneRef.current.objects.some((o) => o.id === candidate.targetId && o.assetId === candidate.assetId)) {
+        throw new Error('The source layer changed. Generate motion for the current layer instead.');
+      }
+      const original = assets.find((a) => a.id === candidate.assetId);
+      if (!original) throw new Error('The original image is no longer available.');
+      await uploadBinary(`/api/projects/${projectId}/assets/${candidate.generatedAssetId}?name=${encodeURIComponent(`${original.name} action`)}`, await toUploadBlob(original.source));
+      await api('PUT', `/api/projects/${projectId}/assets/${candidate.generatedAssetId}/frames`, candidate.frames);
+      setAssets((prev) => [...prev.filter((a) => a.id !== candidate.generatedAssetId), { ...original, id: candidate.generatedAssetId, name: `${original.name} action`, frames: candidate.frames, sequence: undefined }]);
+      const cur = sceneRef.current;
+      commit({ ...cur, objects: cur.objects.map((o) => o.id === candidate.targetId ? { ...o, ...candidate.patch, assetId: candidate.generatedAssetId } : o), scroll: { ...cur.scroll, length: candidate.scrollLength ?? cur.scroll.length } });
+      setMotionReview(null);
+      say('ai', 'Accepted the reviewed action sequence. It is ready to edit and export.');
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : 'The action could not be saved.');
     }
   };
 
@@ -621,7 +764,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
         try {
           await applyServerResult(job, target);
           setJob({ stage: 'Complete' });
-          say('ai', job.result?.plan?.summary ?? 'Generation finished.');
+          say('ai', job.result?.videoUrl ? 'Action generated. Play it forwards and backwards, then accept it only if the movement looks right. You can regenerate or keep the original.' : job.result?.plan?.summary ?? 'Generation finished.');
           setTimeout(() => setJob((j) => (j?.stage === 'Complete' ? null : j)), 1200);
         } catch (e) {
           setJob({ stage: 'Failed', error: e instanceof Error ? e.message : 'Could not use the generated result.' });
@@ -640,26 +783,35 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     }
   };
 
-  const runPaid = async (text: string, target: SceneObject | null) => {
+  const chooseActionMode = (): GenerationMode | null => {
+    const candidates = [mode, 'professional', 'fast', 'byok'] as GenerationMode[];
+    return candidates.find((m) => serverModes.some((s) => s.mode === m && s.available && (s.generatesMotion || s.provider?.startsWith('replicate:')))) ?? null;
+  };
+
+  const runPaid = async (text: string, target: SceneObject | null, requestedMode = mode, sourceOverride?: string) => {
     if (!target) {
       say('ai', 'Add an image first, then describe how it should move.');
       return;
     }
-    if (!modeInfo?.available) {
+    const requested = serverModes.find((m) => m.mode === requestedMode);
+    if (!requested?.available) {
       say('ai', 'That mode is not available on this server yet.');
       return;
     }
-    const keyProvider = mode === 'byok' ? 'replicate' : undefined;
-    const cost = modeInfo.cost === 0 ? 'no credits (you pay the provider directly)' : `${modeInfo.cost} credits (you have ${session.credits})`;
-    if (!window.confirm(`This will use ${cost} with ${modeInfo.provider}. Continue?`)) return;
+    const keyProvider = requestedMode === 'byok' ? 'replicate' : undefined;
+    const cost = requested.cost === 0 ? 'no credits (you pay the provider directly)' : `${requested.cost} credits (you have ${session.credits})`;
+    if (!window.confirm(`This will use ${cost} with ${requested.provider}. Continue?`)) return;
+    activeMotionPrompt.current = text;
+    setMotionReview(null);
     try {
       // Video models cannot make transparent video, so the subject is filmed on a flat colour screen
       // and that colour is keyed out of every frame afterwards. Planning-only jobs need none of that.
       let prompt = text;
       let jobAsset: string | undefined;
-      if (mode !== 'free') {
+      const videoGeneration = requested.generatesMotion || requested.provider?.startsWith('replicate:');
+      if (videoGeneration) {
         setJob({ stage: 'Preparing image' });
-        const source = assets.find((a) => a.id === target.assetId)?.source;
+        const source = sourceOverride ?? assets.find((a) => a.id === target.assetId)?.source;
         if (!source) throw new Error('That layer has no image to animate.');
         const screen = await chromaScreenBlob(source);
         const screenId = `gs-${target.assetId}`.slice(0, 40);
@@ -671,7 +823,8 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
       setJob({ stage: 'Analysing prompt' });
       const created = await api<{ job: ServerJob; credits: number }>('POST', '/api/jobs', {
         projectId,
-        mode,
+        mode: requestedMode,
+        realistic: Boolean(videoGeneration),
         prompt,
         idempotencyKey: crypto.randomUUID(),
         assetId: jobAsset,
@@ -739,9 +892,10 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
     };
     commit({ ...cur, objects: opts.behind ? [layer, ...cur.objects] : [...cur.objects, layer] });
     setSelectedId(layer.id);
+    return { layer, source };
   };
 
-  const pollTool = async (jobId: string, kind: 'image-gen' | 'upscale', opts: { assetId?: string; behind?: boolean }): Promise<void> => {
+  const pollTool = async (jobId: string, kind: 'image-gen' | 'upscale', opts: { assetId?: string; behind?: boolean; prompt?: string }): Promise<void> => {
     const deadline = Date.now() + 20 * 60_000;
     while (!aborted.current && Date.now() < deadline) {
       const { job } = await api<{ job: ServerJob }>('GET', `/api/jobs/${jobId}`);
@@ -764,9 +918,14 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
       if (job.status === 'complete') {
         try {
           if (!job.result?.assetId) throw new Error('The provider did not return an image.');
-          await addGenerated(job.result.assetId, kind, opts);
+          const generated = await addGenerated(job.result.assetId, kind, opts);
           setJob({ stage: 'Complete' });
           say('ai', kind === 'image-gen' ? 'Your image is ready and has been added as a layer.' : 'Upscaled. Your layers now use the sharper image.');
+          if (kind === 'image-gen' && generated && opts.prompt && isSubjectAction(opts.prompt)) {
+            const actionMode = chooseActionMode();
+            if (actionMode) await runPaid(opts.prompt, generated.layer, actionMode, generated.source);
+            else say('ai', 'The image is ready. Connect Replicate to generate its requested action; the still image has not been animated.');
+          }
           setTimeout(() => setJob((j) => (j?.stage === 'Complete' ? null : j)), 1200);
         } catch (e) {
           setJob({ stage: 'Failed', error: e instanceof Error ? e.message : 'Could not use the result.' });
@@ -873,7 +1032,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
           <span className={`save save-${saveState}`} role="status">
             {saveState === 'saved' ? 'Saved' : saveState === 'saving' ? 'Saving…' : 'Could not save (storage full)'}
           </span>
-          <button type="button" className="btn primary" onClick={() => setView('export')} disabled={!hasObjects}>
+          <button type="button" className="btn primary" onClick={() => setView('export')} disabled={!hasObjects || Boolean(motionReview)}>
             Export
           </button>
         </div>
@@ -898,6 +1057,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
           <div className="row">
             <button type="button" className="btn" onClick={() => fileRef.current?.click()}>Upload image</button>
             <button type="button" className="btn ghost" onClick={useSample}>Use sample bird</button>
+            <button type="button" className="btn ghost" onClick={useBirdFlight}>Use robin flight sequence</button>
           </div>
           <input ref={fileRef} type="file" hidden accept="image/png,image/jpeg,image/webp" onChange={(e) => { void onFiles(e.target.files); e.target.value = ''; }} />
           <input ref={replaceRef} type="file" hidden accept="image/png,image/jpeg,image/webp" onChange={(e) => { void onFiles(e.target.files, replaceTarget.current ?? undefined); e.target.value = ''; }} />
@@ -1000,7 +1160,7 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
                 title="Scroll animation preview"
                 sandbox="allow-scripts"
                 srcDoc={previewHtml}
-                onLoad={() => post({ type: 'mf-scene', scene: sceneRef.current })}
+                onLoad={() => post({ type: 'mf-scene', scene: previewSceneRef.current })}
               />
               {sel && !sel.pinned && !sel.attachTo && (
                 <PathOverlay obj={sel} selected={pointIdx} onSelect={(i) => { setPointIdx(i); setRightTab('path'); }} onChange={setPath} />
@@ -1034,7 +1194,15 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
               {sel.line && <LineControls line={sel.line} onChange={(p) => patchSel({ line: { ...sel.line!, ...p } }, `line-${Object.keys(p)[0]}`)} />}
               {sel.kind === 'image' && <Slider label="Size (% of width)" min={2} max={100} step={1} value={sel.widthPct} onChange={(v) => patchSel({ widthPct: v })} />}
               <Slider label="Mobile size multiplier" min={0.2} max={2} step={0.05} value={sel.mobileScale} onChange={(v) => patchSel({ mobileScale: v })} />
-              {sel.kind === 'image' && <Slider label="Wing flaps per scroll" min={0} max={60} step={1} value={sel.flapsPerScroll} onChange={(v) => patchSel({ flapsPerScroll: v })} />}
+              {sel.kind === 'image' && (sel.motion ? <>
+                <label className="field"><span>Action playback</span>
+                  <select value={sel.motion.playback} onChange={(e) => patchSel({ motion: { ...sel.motion!, playback: e.target.value as 'once' | 'loop', cycles: 1 } })}>
+                    <option value="once">Play the action once</option>
+                    <option value="loop">Repeat the action</option>
+                  </select>
+                </label>
+                {sel.motion.playback === 'loop' && <Slider label="Action repeats per scroll" min={0.1} max={20} step={0.1} value={sel.motion.cycles} onChange={(v) => patchSel({ motion: { ...sel.motion!, cycles: v } })} />}
+              </> : <Slider label="Wing flaps per scroll" min={0} max={60} step={1} value={sel.flapsPerScroll} onChange={(v) => patchSel({ flapsPerScroll: v })} />)}
               <Slider label="Body rise & fall" min={0} max={10} step={0.1} value={sel.bob} onChange={(v) => patchSel({ bob: v })} />
               </>)}
               {rightTab === 'look' && (<>
@@ -1072,6 +1240,24 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
               </>)}
               {rightTab === 'path' && (<>
               <h3>Motion path</h3>
+              <label className="field">
+                <span>Flight direction</span>
+                <select value={Object.keys(FLIGHT_ROUTES).find((key) => JSON.stringify(FLIGHT_ROUTES[key]) === JSON.stringify(sel.path)) ?? ''} onChange={(e) => {
+                  const path = FLIGHT_ROUTES[e.target.value];
+                  if (!path) return;
+                  stop();
+                  patchSel({ path, pinned: false, attachTo: null }, 'flight-direction');
+                  setPointIdx(0);
+                  scrub(0);
+                }}>
+                  <option value="">Choose a direction…</option>
+                  <option value="right">Fly right</option>
+                  <option value="left">Fly left</option>
+                  <option value="up">Fly up</option>
+                  <option value="down">Fly down</option>
+                  <option value="return">Fly up and return</option>
+                </select>
+              </label>
               <div className="row">
                 <button type="button" className="btn small" onClick={addPoint} disabled={sel.pinned || !!sel.attachTo || sel.path.length >= 24}>Add point</button>
                 <button type="button" className="btn small ghost danger" onClick={removePoint} disabled={sel.pinned || !!sel.attachTo || sel.path.length <= 2}>Remove point {pointIdx + 1}</button>
@@ -1124,6 +1310,19 @@ export function Editor({ initialPrompt, projectId }: { initialPrompt: string; pr
       </section>
 
       {job && <JobStatus job={job} onClose={() => setJob(null)} />}
+      {motionReview && <section className="panel" aria-label="Review generated action">
+        <h2>Review generated action</h2>
+        <p>Check the full movement for correct limbs, natural contact and complete wing or hand tips. This preview has not replaced your original animation.</p>
+        <div className="row">
+          <button type="button" className="btn primary" onClick={() => void acceptMotion()}>Accept action</button>
+          <button type="button" className="btn ghost" onClick={() => {
+            const target = scene.objects.find((o) => o.id === motionReview.targetId);
+            const actionMode = chooseActionMode();
+            if (target && actionMode) void runPaid(motionReview.prompt, target, actionMode);
+          }}>Regenerate action</button>
+          <button type="button" className="btn ghost" onClick={() => setMotionReview(null)}>Keep original</button>
+        </div>
+      </section>}
       {showShare && projectId && <ShareDialog projectId={projectId} onClose={() => setShowShare(false)} />}
 
       <div className="promptbar">

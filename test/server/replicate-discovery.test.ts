@@ -49,6 +49,32 @@ async function setup(models: Parameters<typeof mockReplicate>[0], env: Record<st
 const video = (pid: string, key: string, extra: object = {}) => ({ projectId: pid, mode: 'fast', prompt: 'flap its wings', idempotencyKey: key, assetId: 'bird-1', ...extra });
 
 describe('Replicate models are described by their own schema', () => {
+  it('generates a general action sequence with instructed moonwalk mechanics', async () => {
+    const app = await setup({ 'bytedance/seedance-1-lite': modelBody({ image: uri, prompt: { type: 'string' } }) });
+    const response = await app.call('POST', '/api/jobs', video(app.pid, 'moonwalk-action-001', { prompt: 'Make this robot moon-walk', realistic: true }), app.u.cookie);
+    await app.settle();
+    const start = app.calls.find((c) => c.method === 'POST')!;
+    expect(start.body.input.prompt).toContain('alternating toe-supported steps');
+    await app.resume();
+    await app.resume();
+    const job = (await app.call('GET', `/api/jobs/${response.body.job.id}`, undefined, app.u.cookie)).body.job;
+    expect(job.status).toBe('complete');
+    expect(job.result.plan.patch).toMatchObject({ motion: { playback: 'once', cycles: 1 }, flapsPerScroll: 0, bob: 0 });
+    expect(job.result.plan.patch.path).toBeUndefined();
+  });
+
+  it('rejects providers that cannot generate instructed motion', async () => {
+    const app = await setup({ 'bytedance/seedance-1-lite': modelBody({ image: uri }) });
+    const free = await app.call('POST', '/api/jobs', video(app.pid, 'real-free-action-001', { mode: 'free', realistic: true }), app.u.cookie);
+    expect(free.status).toBe(400);
+    expect((await app.call('GET', '/api/me', undefined, app.u.cookie)).body.credits).toBe(20);
+    const paid = await app.call('POST', '/api/jobs', video(app.pid, 'no-prompt-action-001', { realistic: true }), app.u.cookie);
+    await app.settle();
+    const job = (await app.call('GET', `/api/jobs/${paid.body.job.id}`, undefined, app.u.cookie)).body.job;
+    expect(job).toMatchObject({ status: 'failed', error: expect.stringContaining('cannot accept action instructions') });
+    expect(app.calls.some((c) => c.method === 'POST')).toBe(false);
+  });
+
   it('needs only a token: Fast uses a default model, Professional stays off until chosen', async () => {
     const app = await setup({});
     const modes = (await app.call('GET', '/api/modes', undefined, app.u.cookie)).body.modes as { mode: string; available: boolean; provider: string | null }[];
@@ -76,7 +102,9 @@ describe('Replicate models are described by their own schema', () => {
     expect(start.body.version).toBe('ver-abc123');
     expect(Object.keys(start.body.input).sort()).toEqual(['camera_fixed', 'duration', 'prompt', 'start_image']);
     expect(start.body.input.start_image).toMatch(/^data:image\/png;base64,/);
-    expect(start.body.input).toMatchObject({ prompt: 'flap its wings', duration: 5, camera_fixed: true });
+    expect(start.body.input).toMatchObject({ duration: 5, camera_fixed: true });
+    expect(start.body.input.prompt).toContain('flap its wings');
+    expect(start.body.input.prompt).toContain('Preserve its identity');
     await app.resume();
     await app.resume();
     expect((await app.call('GET', `/api/jobs/${id}`, undefined, app.u.cookie)).body.job.status).toBe('complete');

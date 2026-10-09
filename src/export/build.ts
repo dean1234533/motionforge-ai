@@ -24,7 +24,7 @@ export function pruneAssets(input: ExportInput, options: ExportOptions = {}): Ex
   for (const id of Object.keys(input.assets)) {
     const users = input.scene.objects.filter((o) => o.assetId === id);
     if (!users.length) continue;
-    const animated = users.some((o) => o.flapsPerScroll > 0);
+    const animated = users.some((o) => o.motion !== undefined || o.flapsPerScroll > 0);
     assets[id] = animated ? input.assets[id].filter((_, i) => i % step === 0) : input.assets[id].slice(0, 1);
   }
   return { scene: input.scene, assets };
@@ -84,7 +84,7 @@ export function buildPreviewHtml(input: ExportInput): string {
 <div id="host"></div>
 <script>${runtimeSource}</script>
 <script>
-var ctl = MotionForge.mount(document.getElementById("host"), ${json(input)});
+var ctl = MotionForge.mount(document.getElementById("host"), ${json(input)}, { preview: true });
 addEventListener("message", function (e) {
   if (e.source !== parent) return;
   var d = e.data || {};

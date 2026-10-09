@@ -7,8 +7,8 @@ Turn an image and a plain-English idea into a scroll-controlled website animatio
 Everything below runs in CI on every push: unit tests (including the whole server against a real SQLite database and a PHP syntax check of the generated WordPress plugin), browser tests of the editor, the particle/HTML/SVG renderers and the video pipeline, and a full-stack browser test that runs the real Worker locally through `wrangler dev`.
 
 **Editor and exports (works with no account, all in the browser)**
-- Upload PNG/JPG/WebP (type and size validated), background removal for plain backgrounds, 24 simulated wing-flap frames
-- Plain-English planning and follow-up edits ("fly more slowly", "flap faster", "move the ending position higher", "smaller on mobile", "reverse the direction", "more cinematic", "add smoke", "add rain", "add a circle", "add a line showing its path", "give it more depth")
+- Upload PNG/JPG/WebP (type and size validated), background removal for plain backgrounds; original still images remain intact until an action is generated
+- Plain-English planning and follow-up edits ("move the ending position higher", "smaller on mobile", "reverse the direction", "more cinematic", "add smoke", "add rain", "add a circle", "add a line showing its path", "give it more depth")
 - Layers, draggable/keyboard-movable motion path, rotation/scale/opacity/blur, easing, pinning, parallax, scroll length, desktop/tablet/mobile preview, undo/redo, autosave
 - **Renderer chosen per element**: images and light particles on canvas, heavy particle scenes on WebGL (automatic canvas fallback), simple shapes as HTML/CSS, lines as SVG that draw in with the scroll; frame sequences for realistic motion
 - **Particle effects** (smoke, fire, water, sparkles, snow/rain), **shapes**, **lines**, layers that **follow other layers**, parallax depth. Everything scrubs and reverses exactly
@@ -22,7 +22,7 @@ Everything below runs in CI on every push: unit tests (including the whole serve
 - Dashboard, new-project, teams, settings, billing, public share pages
 - Encrypted bring-your-own-key vault (AES-GCM, never returned or logged)
 - Credit ledger, cost estimate and confirmation before paid work, jobs with the spec's progress states, safe retry (never charged twice), refund on cancel, **priority processing** for Professional
-- Paid generation: image-to-video (filmed on a green/blue screen, then chroma-keyed into transparent frames), **image generation**, **upscaling**; free with your own key
+- Paid generation: uploaded and generated subjects use Replicate image-to-video for articulated actions, then chroma-keyed transparent frames. Review, accept or regenerate each action; accepted sequences preserve the original image and support once/loop playback, reverse scrubbing and export. Model quality varies and realism cannot be guaranteed. Also supports **image generation**, **upscaling**; free with your own key
 - Share links (view-only, revocable), export history
 
 ## Written but not yet exercised against the real services

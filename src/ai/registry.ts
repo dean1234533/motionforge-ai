@@ -1,4 +1,4 @@
-import { localBackgroundRemover, localMotionFrames } from './imagePipeline';
+import { localBackgroundRemover } from './imagePipeline';
 import { planFromPrompt } from './localPlanner';
 import type { GenerationMode, ProviderSet, ScenePlanner } from './providers';
 
@@ -9,7 +9,7 @@ const localPlanner: ScenePlanner = {
 
 const NEEDS_SERVER = 'Needs the MotionForge server (accounts, encrypted keys, job queue), which is not part of this version.';
 
-const local = { planner: localPlanner, backgroundRemover: localBackgroundRemover, motionFrames: localMotionFrames };
+const local = { planner: localPlanner, backgroundRemover: localBackgroundRemover, motionFrames: { id: 'local-still', generate: async (base: HTMLCanvasElement) => [base] } };
 
 export const PROVIDER_SETS: Record<GenerationMode, ProviderSet> = {
   free: { mode: 'free', label: 'Free', available: true, ...local },

@@ -72,6 +72,8 @@ export const SceneObjectSchema = z
     line: LineSchema.optional(),
     widthPct: num(2, 100).default(22),
     flapsPerScroll: num(0, 80).default(0),
+    /** General subject-action frames; independent of legacy wing-flap controls. */
+    motion: z.object({ playback: z.enum(['once', 'loop']), cycles: num(0.1, 20).default(1) }).optional(),
     path: z.array(KeyframeSchema).min(2).max(24),
     rotation: z.array(num(-360, 360)).min(1).max(16).default([0]),
     scale: z.array(num(0.05, 5)).min(1).max(16).default([1]),
