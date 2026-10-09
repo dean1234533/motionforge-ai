@@ -19,6 +19,13 @@ test('account pages and the cloud editor fit and work on a phone', async ({ page
   await expect(page.getByRole('heading', { name: 'Your projects' })).toBeVisible();
   await fitsWidth(page, 'dashboard');
 
+  // The account links fold into a dropdown on phones.
+  await expect(page.getByRole('link', { name: 'Settings' })).toBeHidden();
+  await page.getByRole('button', { name: /Menu/ }).tap();
+  await page.getByRole('link', { name: 'Settings' }).tap();
+  await expect(page.getByRole('heading', { name: 'AI providers' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Billing' })).toBeHidden();
+
   for (const [path, heading] of [
     ['/#/settings', 'AI providers'],
     ['/#/billing', 'Billing and credits'],

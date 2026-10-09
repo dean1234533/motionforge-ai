@@ -130,6 +130,17 @@ summary { cursor: pointer; font-weight: 600; }
 .center-text { text-align: center; padding: 40px 20px; }
 .appnav nav a { color: var(--muted); text-decoration: none; }
 .appnav nav a.is-current, .appnav nav a:hover { color: var(--text); }
+.appnav { position: relative; }
+.appnav-toggle { display: none; }
+@media (max-width: 600px) {
+  .appnav-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; }
+  .appnav nav { display: none; position: absolute; top: calc(100% - 4px); right: 16px; z-index: 40; min-width: 200px; flex-direction: column; align-items: stretch; gap: 0; padding: 6px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.4); }
+  .appnav nav.is-open { display: flex; }
+  .appnav nav a, .appnav nav > span { display: flex; align-items: center; min-height: 44px; padding: 0 12px; border-radius: 8px; }
+  .appnav nav a.is-current, .landing .appnav nav a.is-current:not(.btn) { background: var(--panel-2); color: var(--text); }
+  .appnav nav > span { border-top: 1px solid var(--border); margin-top: 4px; }
+  .appnav nav .btn { min-height: 44px; justify-content: flex-start; }
+}
 .card-form { max-width: 420px; margin: 40px auto; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 24px; display: grid; gap: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
 .empty-card { background: var(--panel); border: 1px dashed var(--border); border-radius: 14px; padding: 32px; text-align: center; }
 .share { min-height: 100vh; background: #eef2f7; color: #10202f; }
