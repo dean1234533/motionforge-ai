@@ -4,6 +4,7 @@ import { AppNav } from '../components/AppNav';
 import { api, uploadBinary } from '../lib/api';
 import { useSession } from '../lib/session';
 import { emptyScene, newObject } from '../scene/defaults';
+import { kitSlug, makeBrandKit } from '../studio/brandKit';
 import { DESIGN_TYPES, LOGO_ANIMATIONS, buildDesignPrompt, logoAnimationPlan, typeInfo } from '../studio/briefs';
 import type { Brief, DesignType } from '../studio/briefs';
 
@@ -31,6 +32,12 @@ interface Pending {
 }
 
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const saveFile = (href: string, name: string) => {
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = name;
+  a.click();
+};
 const KEY_NAMES: Record<string, string> = { replicate: 'Replicate', openai: 'OpenAI' };
 const keyName = (k: string | null) => (k ? KEY_NAMES[k] ?? k : 'API');
 
@@ -54,6 +61,14 @@ export function Studio() {
   const [animateFor, setAnimateFor] = useState<Design | null>(null);
   const [animation, setAnimation] = useState(LOGO_ANIMATIONS[0].id);
   const [animating, setAnimating] = useState(false);
+  /** Finished SVGs this session, so a logo is never vectorised (and charged) twice. */
+  const [svgUrls, setSvgUrls] = useState<Record<string, string>>({});
+  const [kitFor, setKitFor] = useState<Design | null>(null);
+  const [kitBrand, setKitBrand] = useState('');
+  const [kitSvg, setKitSvg] = useState(true);
+  const [kitBusy, setKitBusy] = useState(false);
+  const [kitStep, setKitStep] = useState('');
+  const [kitError, setKitError] = useState('');
 
   const info = typeInfo(brief.type);
   const built = useMemo(() => buildDesignPrompt(brief), [brief]);
@@ -153,41 +168,83 @@ export function Studio() {
     }
   };
 
+  const vectorPrice = () => {
+    const own = !vectorTool?.platformKey || useOwnKey;
+    return { own, label: own ? `your own ${keyName(vectorTool?.keyProvider ?? null)} key (no credits)` : `${vectorTool?.cost ?? 0} credits` };
+  };
+
+  /** Runs the vectorise job once per design and session; later calls reuse the finished SVG. */
+  const makeVector = async (d: Design): Promise<string> => {
+    if (svgUrls[d.id]) return svgUrls[d.id];
+    if (!projectId || !vectorTool) throw new Error('Vector logos are not set up on this server.');
+    const r = await api<{ job: { id: string }; credits: number }>('POST', '/api/jobs', {
+      projectId,
+      kind: 'vectorize',
+      assetId: d.id,
+      useOwnKey: vectorPrice().own,
+      idempotencyKey: `vector-${d.id}-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    session.setCredits(r.credits);
+    const deadline = Date.now() + 10 * 60_000;
+    while (Date.now() < deadline) {
+      await pause(2500);
+      const { job } = await api<{ job: { status: string; error: string | null; result: { svgUrl: string | null } | null } }>('GET', `/api/jobs/${r.job.id}`);
+      if (job.status === 'complete' && job.result?.svgUrl) {
+        const url = job.result.svgUrl;
+        setSvgUrls((u) => ({ ...u, [d.id]: url }));
+        return url;
+      }
+      if (job.status === 'failed' || job.status === 'cancelled') throw new Error(job.error ?? 'The vector could not be made.');
+    }
+    throw new Error('This is taking longer than expected. Try again shortly.');
+  };
+
   /** Turns a design into a vector SVG (what clients expect for a logo) and downloads it. */
   const vectorize = async (d: Design) => {
-    if (!projectId || !vectorTool || vectoring[d.id] === '') return;
-    const own = !vectorTool.platformKey || useOwnKey;
-    const priced = own ? `your own ${keyName(vectorTool.keyProvider)} key (no credits)` : `${vectorTool.cost} credits`;
-    if (!window.confirm(`Turn ${d.name} into a vector SVG with ${priced}?`)) return;
+    if (!vectorTool || vectoring[d.id] === '') return;
+    if (!svgUrls[d.id] && !window.confirm(`Turn ${d.name} into a vector SVG with ${vectorPrice().label}?`)) return;
     setVectoring((v) => ({ ...v, [d.id]: '' }));
-    const fail = (msg: string) => setVectoring((v) => ({ ...v, [d.id]: msg }));
     try {
-      const r = await api<{ job: { id: string }; credits: number }>('POST', '/api/jobs', {
-        projectId,
-        kind: 'vectorize',
-        assetId: d.id,
-        useOwnKey: own,
-        idempotencyKey: `vector-${d.id}-${crypto.randomUUID().slice(0, 8)}`,
-      });
-      session.setCredits(r.credits);
-      const deadline = Date.now() + 10 * 60_000;
-      while (Date.now() < deadline) {
-        await pause(2500);
-        const { job } = await api<{ job: { status: string; error: string | null; result: { svgUrl: string | null } | null } }>('GET', `/api/jobs/${r.job.id}`);
-        if (job.status === 'complete' && job.result?.svgUrl) {
-          const a = document.createElement('a');
-          a.href = job.result.svgUrl;
-          a.download = d.name.replace(/\.[^.]+$/, '.svg');
-          a.click();
-          setVectoring(({ [d.id]: _, ...rest }) => rest);
-          return;
-        }
-        if (job.status === 'failed' || job.status === 'cancelled') return fail(job.error ?? 'The vector could not be made.');
-      }
-      fail('This is taking longer than expected. Try again shortly.');
+      saveFile(await makeVector(d), d.name.replace(/\.[^.]+$/, '.svg'));
+      setVectoring(({ [d.id]: _, ...rest }) => rest);
     } catch (err) {
-      fail(err instanceof Error ? err.message : 'Could not start the vector.');
+      setVectoring((v) => ({ ...v, [d.id]: err instanceof Error ? err.message : 'Could not make the vector.' }));
     }
+  };
+
+  /** Bundles the logo, a transparent copy, the SVG (optional), a colour sheet and a brand guide into one ZIP. */
+  const buildKit = async () => {
+    if (!projectId || !kitFor || kitBusy) return;
+    setKitBusy(true);
+    setKitError('');
+    try {
+      let svg: Uint8Array | undefined;
+      if (kitSvg && vectorTool) {
+        setKitStep('Making the vector logo…');
+        const res = await fetch(await makeVector(kitFor), { credentials: 'same-origin' });
+        if (!res.ok) throw new Error('The vector logo could not be downloaded.');
+        svg = new Uint8Array(await res.arrayBuffer());
+      }
+      setKitStep('Building the kit…');
+      const image = await (await fetch(`/api/projects/${projectId}/assets/${kitFor.id}`, { credentials: 'same-origin' })).blob();
+      const { zip } = await makeBrandKit(kitBrand.trim() || 'Brand', image, svg);
+      const url = URL.createObjectURL(new Blob([zip as BlobPart], { type: 'application/zip' }));
+      saveFile(url, `${kitSlug(kitBrand)}-brand-kit.zip`);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setKitFor(null);
+    } catch (err) {
+      setKitError(err instanceof Error ? err.message : 'Could not build the brand kit.');
+    } finally {
+      setKitBusy(false);
+      setKitStep('');
+    }
+  };
+
+  const openKit = (d: Design) => {
+    setKitFor(d);
+    setKitError('');
+    // "aqua-vibe-1a2b3c4d.png" -> "Aqua Vibe"
+    setKitBrand(d.name.replace(/(-[0-9a-f]{8})?\.[^.]+$/, '').split('-').filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' '));
   };
 
   const remove = async (d: Design) => {
@@ -331,6 +388,7 @@ export function Studio() {
                       {vectoring[d.id] === '' ? 'Vectorising…' : 'Vector SVG'}
                     </button>
                   )}
+                  <button type="button" className="btn small" onClick={() => openKit(d)} aria-label={`Brand kit for ${d.name}`}>Brand kit</button>
                   <button type="button" className="btn small primary" onClick={() => setAnimateFor(d)}>Animate</button>
                   <button type="button" className="btn small danger" onClick={() => void remove(d)} aria-label={`Delete ${d.name}`}>Delete</button>
                 </div>
@@ -340,6 +398,30 @@ export function Studio() {
           </ul>
           <p className="muted small-print">A project holds up to 30 images, so download finished work and delete what you no longer need.</p>
         </>
+      )}
+
+      {kitFor && (
+        <div className="brand-animate" role="dialog" aria-modal="true" aria-labelledby="kit-title">
+          <div className="modal-card">
+            <h2 id="kit-title">Brand kit</h2>
+            <p className="muted">One ZIP to hand to your client: the logo, a transparent version, a colour sheet with HEX, RGB and CMYK values, and a printable brand guide.</p>
+            <label className="field"><span>Brand name on the guide</span>
+              <input type="text" value={kitBrand} maxLength={60} onChange={(e) => setKitBrand(e.target.value)} />
+            </label>
+            {vectorTool && (
+              <label className="check">
+                <input type="checkbox" checked={kitSvg} onChange={(e) => setKitSvg(e.target.checked)} />
+                Include a vector SVG {svgUrls[kitFor.id] ? '(already made)' : `(${vectorPrice().label})`}
+              </label>
+            )}
+            {kitStep && <p role="status">{kitStep}</p>}
+            {kitError && <p className="error" role="alert">{kitError}</p>}
+            <div className="row">
+              <button type="button" className="btn" disabled={kitBusy} onClick={() => setKitFor(null)}>Cancel</button>
+              <button type="button" className="btn primary" disabled={kitBusy} onClick={() => void buildKit()}>{kitBusy ? 'Working…' : 'Download kit'}</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {animateFor && (

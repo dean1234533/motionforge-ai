@@ -37,7 +37,7 @@ export function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-function toCanvas(img: HTMLImageElement, maxSide: number): HTMLCanvasElement {
+export function toCanvas(img: HTMLImageElement, maxSide: number): HTMLCanvasElement {
   const w0 = img.naturalWidth || img.width || 1;
   const h0 = img.naturalHeight || img.height || 1;
   const k = Math.min(1, maxSide / Math.max(w0, h0));
@@ -101,7 +101,7 @@ export const localBackgroundRemover: BackgroundRemover = {
   },
 };
 
-function trim(c: HTMLCanvasElement): HTMLCanvasElement {
+export function trim(c: HTMLCanvasElement): HTMLCanvasElement {
   const ctx = c.getContext('2d')!;
   const { width: w, height: h, data } = ctx.getImageData(0, 0, c.width, c.height);
   let x0 = w;

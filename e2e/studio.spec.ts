@@ -119,3 +119,38 @@ test('downloads a design as a vector SVG', async ({ page }) => {
   expect(seen.vectors[0]).toMatchObject({ kind: 'vectorize', assetId: 'design-00000001', useOwnKey: false });
   await expect(page.getByRole('button', { name: /as a vector SVG/ })).toHaveText('Vector SVG');
 });
+
+test('builds a brand kit ZIP with the SVG, colours and guide', async ({ page }) => {
+  const seen = await mockApi(page);
+  await page.goto('/#/studio');
+  await page.getByLabel('Brand name').fill('Aqua Vibe');
+  await page.getByLabel('How many variations').selectOption('1');
+  page.once('dialog', (d) => void d.accept());
+  await page.getByRole('button', { name: 'Create design' }).click();
+  await expect(page.locator('.brand-gallery li')).toHaveCount(1, { timeout: 15_000 });
+
+  await page.getByRole('button', { name: /Brand kit for/ }).click();
+  await expect(page.getByLabel('Brand name on the guide')).toHaveValue('Aqua Vibe');
+  await page.getByLabel('Brand name on the guide').fill('Aqua Vibe Shop');
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download kit' }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('aqua-vibe-shop-brand-kit.zip');
+  expect(seen.vectors).toHaveLength(1);
+
+  const { unzipSync, strFromU8 } = await import('fflate');
+  const files = unzipSync(new Uint8Array(readFileSync((await file.path())!)));
+  const dir = 'aqua-vibe-shop-brand-kit/';
+  expect(Object.keys(files).sort()).toEqual(
+    ['aqua-vibe-shop-logo-transparent.png', 'aqua-vibe-shop-logo.png', 'aqua-vibe-shop-logo.svg', 'brand-guide.html', 'colour-sheet.png', 'colours.txt'].map((n) => dir + n),
+  );
+  expect(strFromU8(files[`${dir}colours.txt`])).toMatch(/^Aqua Vibe Shop brand colours\n\n1\. #[0-9A-F]{6} /);
+  expect(Array.from(files[`${dir}colour-sheet.png`].subarray(0, 4))).toEqual([0x89, 0x50, 0x4e, 0x47]);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+
+  // The SVG made for the kit is reused: downloading it on its own costs nothing more.
+  const svg = page.waitForEvent('download');
+  await page.getByRole('button', { name: /as a vector SVG/ }).click();
+  await svg;
+  expect(seen.vectors).toHaveLength(1);
+});
