@@ -1,4 +1,4 @@
-import { decryptSecret, encryptSecret } from './crypto';
+import { decryptSecret, encryptSecret, unb64 } from './crypto';
 import { HttpError } from './http';
 import type { D1Database } from './types';
 
@@ -16,6 +16,18 @@ export function assertProvider(p: string): void {
 
 function requireSecret(secret: string | undefined): asserts secret is string {
   if (!secret) throw new HttpError(501, 'Saving API keys is not set up on this server yet. The host needs to set KEY_ENCRYPTION_SECRET.');
+  let bytes = 0;
+  try {
+    bytes = unb64(secret).length;
+  } catch {
+    // not base64; reported below
+  }
+  if (bytes !== 32) {
+    throw new HttpError(
+      500,
+      `KEY_ENCRYPTION_SECRET is the wrong length (${secret.length} characters). It must be the full output of "openssl rand -base64 32": 44 characters ending in "=".`,
+    );
+  }
 }
 
 export async function saveKey(db: D1Database, secret: string, userId: string, provider: string, apiKey: unknown): Promise<void> {
@@ -56,7 +68,13 @@ export async function readKey(db: D1Database, secret: string, userId: string, pr
     .prepare('SELECT ciphertext, iv FROM provider_keys WHERE user_id = ? AND provider = ?')
     .bind(userId, provider)
     .first<{ ciphertext: string; iv: string }>();
-  return row ? decryptSecret(secret, row.ciphertext, row.iv, `${userId}:${provider}`) : null;
+  if (!row) return null;
+  try {
+    return await decryptSecret(secret, row.ciphertext, row.iv, `${userId}:${provider}`);
+  } catch {
+    // Saved under a different KEY_ENCRYPTION_SECRET (or the row was tampered with).
+    throw new HttpError(409, `Your saved ${provider} key was saved before the server's encryption secret changed, so it can no longer be read. Remove it in Settings and add it again.`);
+  }
 }
 
 export async function testKey(db: D1Database, secret: string, userId: string, provider: string, fetchFn: typeof fetch) {

@@ -27,4 +27,22 @@ describe('setup report', () => {
     expect(res.body.settingNames).toContain('replicate_api_key ');
     expect(res.text).not.toContain('r8_pasted');
   });
+
+  it('explains a wrong-length secret and keys saved under an old secret', async () => {
+    const short = makeApp({}, { KEY_ENCRYPTION_SECRET: 'a-32-character-password-typed-in' });
+    const u = await short.user();
+    const bad = await short.call('PUT', '/api/keys/openai', { apiKey: 'sk-good-key-1234' }, u.cookie);
+    expect(bad.status).toBe(500);
+    expect(bad.body.error).toContain('44 characters');
+
+    const app = makeApp();
+    const v = await app.user();
+    await app.call('PUT', '/api/keys/openai', { apiKey: 'sk-good-key-1234' }, v.cookie);
+    app.env.KEY_ENCRYPTION_SECRET = Buffer.alloc(32, 9).toString('base64');
+    const stale = await app.call('POST', '/api/keys/openai/test', {}, v.cookie);
+    expect(stale.status).toBe(409);
+    expect(stale.body.error).toContain('Remove it in Settings and add it again');
+    expect((await app.call('DELETE', '/api/keys/openai', undefined, v.cookie)).status).toBe(200);
+    expect((await app.call('PUT', '/api/keys/openai', { apiKey: 'sk-good-key-1234' }, v.cookie)).status).toBe(200);
+  });
 });
