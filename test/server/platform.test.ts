@@ -256,6 +256,21 @@ describe('Replicate provider (mocked HTTP; not verified against the live service
     expect((await app.call('GET', '/api/me', undefined, app.u.cookie)).body.credits).toBe(10);
   });
 
+  it('checks on a waiting job when the app asks for it, without waiting for the cron', async () => {
+    const { fetchFn } = mockReplicate();
+    const app = await withAsset(fetchFn);
+    const id = (await app.call('POST', '/api/jobs', body(app.projectId, 'idem-rep-poll'), app.u.cookie)).body.job.id;
+    await app.settle();
+    const poll = async () => {
+      app.sqlite.prepare('UPDATE jobs SET updated_at = updated_at - 10').run();
+      await app.call('GET', `/api/jobs/${id}`, undefined, app.u.cookie);
+      await app.settle();
+    };
+    await poll(); // still processing
+    await poll(); // succeeded
+    expect((await app.call('GET', `/api/jobs/${id}`, undefined, app.u.cookie)).body.job.status).toBe('complete');
+  });
+
   it('fails cleanly when the provider fails, and does not charge again on retry', async () => {
     const { fetchFn } = mockReplicate({ status: 'failed', error: 'NSFW' });
     const app = await withAsset(fetchFn);

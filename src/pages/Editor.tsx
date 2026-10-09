@@ -1006,7 +1006,8 @@ export function Editor({ initialPrompt, projectId, autoBird = false }: { initial
           <label className="inline">
             <span className="sr-only">Generation mode</span>
             <select value={mode} onChange={(e) => setMode(e.target.value as GenerationMode)} aria-label="Generation mode">
-              {Object.values(PROVIDER_SETS).map((p) => (
+              {/* Fast and Professional need the host's own Replicate token; hide them until the server has one. */}
+              {Object.values(PROVIDER_SETS).filter((p) => (p.mode !== 'fast' && p.mode !== 'professional') || serverModes.some((s) => s.mode === p.mode && s.available)).map((p) => (
                 <option key={p.mode} value={p.mode}>
                   {p.label}{modeProblem(p.mode) ? ' (see note below)' : ''}
                 </option>

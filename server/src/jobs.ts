@@ -24,9 +24,10 @@ export interface JobRow {
   input: string;
   state: string;
   attempts: number;
+  updated_at: number;
 }
 
-const COLUMNS = 'id, user_id, project_id, kind, mode, status, stage, stage_done, error, cost, input, state, attempts';
+const COLUMNS = 'id, user_id, project_id, kind, mode, status, stage, stage_done, error, cost, input, state, attempts, updated_at';
 const KINDS: JobKind[] = ['motion', 'image-gen', 'upscale'];
 
 export const jobView = (j: JobRow) => {
