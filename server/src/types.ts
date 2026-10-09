@@ -60,6 +60,9 @@ export interface Env {
   /** Brand Studio (logos, flyers, product ads): a Replicate text-to-image model by name, or a version id. */
   REPLICATE_DESIGN_MODEL?: string;
   REPLICATE_DESIGN_VERSION?: string;
+  /** Turns a design into a vector SVG logo. */
+  REPLICATE_VECTORIZE_MODEL?: string;
+  REPLICATE_VECTORIZE_VERSION?: string;
   /** Image generation: the platform key (optional if every user brings their own) and the model name. */
   OPENAI_API_KEY?: string;
   OPENAI_IMAGE_MODEL?: string;

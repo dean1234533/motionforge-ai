@@ -72,7 +72,9 @@ Brand Studio (`#/studio`) turns a short brief into a detailed design prompt and 
 4. Cloudflare's built-in AI (FLUX schnell). Always square, and weaker at lettering, so short brand names work best.
 5. Otherwise people use their own Replicate key with Ideogram.
 
-A design costs 6 credits (`server/src/providers.ts`). Like the other model defaults, the Ideogram suggestion has not been run against Replicate yet, so try one design after adding the token.
+**Vector logos (SVG):** each design has a "Vector SVG" button that converts it with `recraft-ai/recraft-vectorize` on Replicate (4 credits with `REPLICATE_API_TOKEN`, otherwise people use their own Replicate key). Choose another model with `REPLICATE_VECTORIZE_MODEL` or `REPLICATE_VECTORIZE_VERSION`. SVG files are only ever offered as downloads, never shown inside the app, because an SVG can carry script.
+
+A design costs 6 credits (`server/src/providers.ts`). Like the other model defaults, the Ideogram and Recraft Vectorize suggestions have not been run against Replicate yet, so try one design after adding the token.
 
 ### Invitation emails (Resend)
 

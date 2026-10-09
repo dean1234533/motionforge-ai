@@ -5,10 +5,11 @@ import type { Page, Route } from '@playwright/test';
 const LOGO = readFileSync(new URL('../public/icons/icon-512.png', import.meta.url));
 const STUDIO = '11111111-1111-4111-8111-111111111111';
 const ANIM = '22222222-2222-4222-8222-222222222222';
+const VECTOR_JOB = '44444444-4444-4444-8444-444444444444';
 
 /** A signed-in account with Brand Studio set up, served entirely from mocks. */
 async function mockApi(page: Page) {
-  const seen = { jobs: [] as Record<string, unknown>[], created: [] as Record<string, unknown>[], uploads: [] as string[] };
+  const seen = { vectors: [] as Record<string, unknown>[], jobs: [] as Record<string, unknown>[], created: [] as Record<string, unknown>[], uploads: [] as string[] };
   let designs: { id: string; name: string }[] = [];
   let animScene: unknown = null;
   const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -19,7 +20,7 @@ async function mockApi(page: Page) {
     const p = url.pathname;
     const m = req.method();
     if (p === '/api/me') return json(route, { user: { id: 'u1', email: 'a@b.co', plan: 'professional' }, credits: 100 });
-    if (p === '/api/modes') return json(route, { modes: [], balance: 100, tools: [{ kind: 'design', label: 'Brand design', cost: 6, provider: 'replicate:ideogram-ai/ideogram-v3-turbo', keyProvider: 'replicate', available: true, platformKey: true }] });
+    if (p === '/api/modes') return json(route, { modes: [], balance: 100, tools: [{ kind: 'design', label: 'Brand design', cost: 6, provider: 'replicate:ideogram-ai/ideogram-v3-turbo', keyProvider: 'replicate', available: true, platformKey: true }, { kind: 'vectorize', label: 'Vector logo (SVG)', cost: 4, provider: 'replicate:recraft-ai/recraft-vectorize', keyProvider: 'replicate', available: true, platformKey: true }] });
     if (p === '/api/teams') return json(route, { teams: [] });
     if (p === '/api/projects' && m === 'GET') return json(route, { projects: [] });
     if (p === '/api/projects' && m === 'POST') {
@@ -29,6 +30,12 @@ async function mockApi(page: Page) {
       animScene = body.scene;
       return json(route, { project: { id: ANIM } }, 201);
     }
+    if (p === '/api/jobs' && m === 'POST' && req.postDataJSON().kind === 'vectorize') {
+      seen.vectors.push(req.postDataJSON());
+      return json(route, { job: { id: VECTOR_JOB }, credits: 80 }, 202);
+    }
+    if (p === `/api/jobs/${VECTOR_JOB}`) return json(route, { job: { status: 'complete', error: null, result: { svgUrl: `/api/jobs/${VECTOR_JOB}/svg` } } });
+    if (p === `/api/jobs/${VECTOR_JOB}/svg`) return route.fulfill({ status: 200, contentType: 'image/svg+xml', headers: { 'content-disposition': 'attachment; filename="logo.svg"' }, body: '<svg xmlns="http://www.w3.org/2000/svg"/>' });
     if (p === '/api/jobs' && m === 'POST') {
       const body = req.postDataJSON();
       seen.jobs.push(body);
@@ -94,4 +101,21 @@ test('switches to flyer fields and a portrait canvas', async ({ page }) => {
   await expect(page.locator('.brand-gallery li')).toHaveCount(1, { timeout: 15_000 });
   expect(seen.jobs[0]).toMatchObject({ aspect: 'portrait', transparent: false });
   expect(seen.jobs[0].prompt).toContain('"Sat 14 June, 8pm"');
+});
+
+test('downloads a design as a vector SVG', async ({ page }) => {
+  const seen = await mockApi(page);
+  await page.goto('/#/studio');
+  await page.getByLabel('Brand name').fill('Aqua Vibe');
+  await page.getByLabel('How many variations').selectOption('1');
+  page.once('dialog', (d) => void d.accept());
+  await page.getByRole('button', { name: 'Create design' }).click();
+  await expect(page.locator('.brand-gallery li')).toHaveCount(1, { timeout: 15_000 });
+
+  page.once('dialog', (d) => void d.accept());
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: /as a vector SVG/ }).click();
+  expect((await download).suggestedFilename()).toBe('aqua-vibe-00000001.svg');
+  expect(seen.vectors[0]).toMatchObject({ kind: 'vectorize', assetId: 'design-00000001', useOwnKey: false });
+  await expect(page.getByRole('button', { name: /as a vector SVG/ })).toHaveText('Vector SVG');
 });

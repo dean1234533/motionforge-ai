@@ -15,7 +15,18 @@ export const DEFAULT_MODELS = {
   upscale: 'recraft-ai/recraft-crisp-upscale',
   /** Strong at lettering, which logos and flyers depend on. */
   design: 'ideogram-ai/ideogram-v3-turbo',
+  /** Image in, SVG out: what clients expect when they buy a logo. */
+  vectorize: 'recraft-ai/recraft-vectorize',
 };
+
+const MAX_SVG_BYTES = 5 * 1024 * 1024;
+
+/** True when the bytes are an SVG document (optionally after an XML declaration, comments or a doctype). */
+export function looksLikeSvg(bytes: Uint8Array): boolean {
+  const head = new TextDecoder().decode(bytes.subarray(0, 2048)).replace(/^\uFEFF/, '');
+  const rest = head.replace(/^(<\?xml[^>]*\?>|<!--[\s\S]*?-->|<!DOCTYPE[^>]*>|\s)+/i, '');
+  return /^<svg[\s>]/i.test(rest);
+}
 
 /** Either a model name (`owner/name`, the app reads the model to learn its inputs) or an explicit version id. */
 export interface ModelTarget {
@@ -306,6 +317,43 @@ export function replicateDesignProvider(cfg: ReplicateConfig): ServerProvider {
   };
 }
 
+/** Converts one of the project's images into a vector SVG, kept with the job for download. */
+export function replicateVectorizeProvider(cfg: ReplicateConfig): ServerProvider {
+  return {
+    id: `replicate:${label(cfg.target)}`,
+    keyProviders: ['replicate'],
+    needsImage: true,
+    platformKey: Boolean(cfg.token),
+    async step(stage, ctx) {
+      if (stage !== 'Vectorising') return;
+      const token = ctx.apiKey ?? cfg.token;
+      if (!token) throw new Error('No API key is available for this provider.');
+      const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+
+      if (typeof ctx.state.predictionId !== 'string') {
+        if (!ctx.input.assetId) throw new Error('Choose a design to turn into a vector.');
+        const asset = await ctx.assets.read(ctx.input.assetId);
+        if (!asset) throw new Error('The source image could not be found.');
+        const model = await resolveModel(cfg, token);
+        throw new PendingError({ predictionId: await startPrediction(cfg, headers, model.version, { [model.imageField]: toDataUri(asset.bytes, asset.type) }) });
+      }
+
+      const p = await pollPrediction(cfg, headers, ctx.state.predictionId);
+      if (p.status === 'failed' || p.status === 'canceled') throw new Error(`Vectorising ${p.status}.`);
+      if (p.status !== 'succeeded') throw new PendingError();
+      const out = Array.isArray(p.output) ? p.output[0] : p.output;
+      if (typeof out !== 'string' || !trustedResultHost(out)) throw new Error('The provider returned an unexpected result.');
+      const res = await cfg.fetchFn(out, { signal: AbortSignal.timeout(60_000) });
+      if (!res.ok) throw new Error('The vector file could not be downloaded.');
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytes.length === 0 || bytes.length > MAX_SVG_BYTES) throw new Error('The vector file was an unexpected size.');
+      if (!looksLikeSvg(bytes)) throw new Error('The provider did not return an SVG file.');
+      await ctx.assets.putJobFile('logo.svg', bytes, 'image/svg+xml');
+      return { svg: true };
+    },
+  };
+}
+
 function target(version: string | undefined, model: string | undefined, fallbackModel: string | undefined, imageField?: string, scaleField?: string): ModelTarget | null {
   if (version) return { version, imageField, scaleField };
   if (model) return { model };
@@ -324,6 +372,8 @@ export function toolsFromEnv(env: Env, fetchFn: typeof fetch): ToolRegistry {
   const up = target(env.REPLICATE_UPSCALE_VERSION, env.REPLICATE_UPSCALE_MODEL, DEFAULT_MODELS.upscale, env.REPLICATE_UPSCALE_IMAGE_FIELD, env.REPLICATE_UPSCALE_SCALE_FIELD);
   if (up) tools.upscale = replicateUpscaleProvider({ target: up, token: env.REPLICATE_API_TOKEN, fetchFn });
   tools.design = designProvider(env, fetchFn);
+  const vec = target(env.REPLICATE_VECTORIZE_VERSION, env.REPLICATE_VECTORIZE_MODEL, DEFAULT_MODELS.vectorize);
+  if (vec) tools.vectorize = replicateVectorizeProvider({ target: vec, token: env.REPLICATE_API_TOKEN, fetchFn });
   return tools;
 }
 

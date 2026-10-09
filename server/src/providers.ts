@@ -1,6 +1,6 @@
 import { planFromPrompt } from '../../src/ai/localPlanner';
 
-export type JobKind = 'motion' | 'image-gen' | 'upscale' | 'design';
+export type JobKind = 'motion' | 'image-gen' | 'upscale' | 'design' | 'vectorize';
 
 /** Canvas shape for Brand Studio designs: logos are square, flyers portrait, banners landscape. */
 export type Aspect = 'square' | 'portrait' | 'landscape';
@@ -17,14 +17,14 @@ export const MOTION_STAGES = [
 ] as const;
 export const STAGES = MOTION_STAGES;
 
-export const stagesFor = (kind: JobKind): readonly string[] =>
-  kind === 'image-gen'
-    ? ['Preparing image', 'Generating image', 'Optimising assets']
-    : kind === 'design'
-      ? ['Preparing brief', 'Designing', 'Optimising assets']
-      : kind === 'upscale'
-      ? ['Preparing image', 'Upscaling', 'Optimising assets']
-      : MOTION_STAGES;
+const TOOL_STAGES: Record<Exclude<JobKind, 'motion'>, readonly string[]> = {
+  'image-gen': ['Preparing image', 'Generating image', 'Optimising assets'],
+  upscale: ['Preparing image', 'Upscaling', 'Optimising assets'],
+  design: ['Preparing brief', 'Designing', 'Optimising assets'],
+  vectorize: ['Preparing image', 'Vectorising', 'Optimising assets'],
+};
+
+export const stagesFor = (kind: JobKind): readonly string[] => (kind === 'motion' ? MOTION_STAGES : TOOL_STAGES[kind]);
 
 export type Mode = 'free' | 'fast' | 'professional' | 'byok';
 
@@ -40,6 +40,7 @@ export const TOOLS: Record<Exclude<JobKind, 'motion'>, { label: string; cost: nu
   'image-gen': { label: 'Image generation', cost: 4 },
   upscale: { label: 'Upscale', cost: 6 },
   design: { label: 'Brand design', cost: 6 },
+  vectorize: { label: 'Vector logo (SVG)', cost: 4 },
 };
 
 export interface StepContext {

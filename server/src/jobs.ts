@@ -28,7 +28,9 @@ export interface JobRow {
 }
 
 const COLUMNS = 'id, user_id, project_id, kind, mode, status, stage, stage_done, error, cost, input, state, attempts, updated_at';
-const KINDS: JobKind[] = ['motion', 'image-gen', 'upscale', 'design'];
+const KINDS: JobKind[] = ['motion', 'image-gen', 'upscale', 'design', 'vectorize'];
+/** Tools that work on an existing image and need no prompt. */
+const IMAGE_ONLY: JobKind[] = ['upscale', 'vectorize'];
 /** Design briefs spell out text, colours and layout, so they need more room than a motion prompt. */
 const MAX_DESIGN_PROMPT = 1500;
 
@@ -46,7 +48,7 @@ export const jobView = (j: JobRow) => {
     attempts: j.attempts,
     result:
       j.status === 'complete'
-        ? { plan: state.plan ?? null, videoUrl: state.video ? `/api/jobs/${j.id}/video` : null, assetId: (state.assetId as string | undefined) ?? null }
+        ? { plan: state.plan ?? null, videoUrl: state.video ? `/api/jobs/${j.id}/video` : null, svgUrl: state.svg ? `/api/jobs/${j.id}/svg` : null, assetId: (state.assetId as string | undefined) ?? null }
         : null,
   };
 };
@@ -67,7 +69,7 @@ export function estimate(mode: string, providers: ProviderRegistry) {
 }
 
 export function estimateTools(reg: Registry) {
-  return (['image-gen', 'upscale', 'design'] as const).map((kind) => {
+  return (['image-gen', 'upscale', 'design', 'vectorize'] as const).map((kind) => {
     const p = reg.tools[kind];
     return {
       kind,
@@ -105,8 +107,8 @@ export async function createJob(db: D1Database, env: Env, reg: Registry, userId:
   if (typeof idem !== 'string' || idem.length < 8 || idem.length > 80) throw new HttpError(400, 'An idempotencyKey of 8 to 80 characters is required.');
   if (typeof body.projectId !== 'string') throw new HttpError(400, 'projectId is required.');
   const promptRaw = typeof body.prompt === 'string' ? sanitizeText(body.prompt, kind === 'design' ? MAX_DESIGN_PROMPT : undefined) : '';
-  if (!promptRaw && kind !== 'upscale') throw new HttpError(400, 'Describe what you want.');
-  const prompt = promptRaw || 'upscale';
+  if (!promptRaw && !IMAGE_ONLY.includes(kind)) throw new HttpError(400, 'Describe what you want.');
+  const prompt = promptRaw || kind;
 
   // Same key from the same user returns the same job, never a second charge.
   const existing = await db.prepare(`SELECT ${COLUMNS} FROM jobs WHERE user_id = ? AND idempotency_key = ?`).bind(userId, idem).first<JobRow>();

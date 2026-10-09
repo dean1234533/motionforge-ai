@@ -11,7 +11,7 @@ import type { Brief, DesignType } from '../studio/briefs';
 export const STUDIO_PROJECT = 'Brand Studio';
 
 interface DesignTool {
-  kind: 'design';
+  kind: 'design' | 'vectorize';
   cost: number;
   provider: string | null;
   keyProvider: string | null;
@@ -37,6 +37,9 @@ const keyName = (k: string | null) => (k ? KEY_NAMES[k] ?? k : 'API');
 export function Studio() {
   const session = useSession();
   const [tool, setTool] = useState<DesignTool | null>(null);
+  const [vectorTool, setVectorTool] = useState<DesignTool | null>(null);
+  /** Designs being turned into SVG, and any error for each. */
+  const [vectoring, setVectoring] = useState<Record<string, string>>({});
   const [projectId, setProjectId] = useState<string | null>(null);
   const [designs, setDesigns] = useState<Design[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,6 +75,7 @@ export function Studio() {
           api<{ projects: { id: string; name: string; teamId: string | null }[] }>('GET', '/api/projects'),
         ]);
         setTool((modes.tools.find((t) => t.kind === 'design') as DesignTool | undefined) ?? null);
+        setVectorTool((modes.tools.find((t) => t.kind === 'vectorize' && 'available' in t && t.available) as DesignTool | undefined) ?? null);
         session.setCredits(modes.balance);
         const studio = list.projects.find((p) => p.name === STUDIO_PROJECT && !p.teamId);
         if (studio) {
@@ -146,6 +150,43 @@ export function Studio() {
       setError(err instanceof Error ? err.message : 'Could not start the design.');
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** Turns a design into a vector SVG (what clients expect for a logo) and downloads it. */
+  const vectorize = async (d: Design) => {
+    if (!projectId || !vectorTool || vectoring[d.id] === '') return;
+    const own = !vectorTool.platformKey || useOwnKey;
+    const priced = own ? `your own ${keyName(vectorTool.keyProvider)} key (no credits)` : `${vectorTool.cost} credits`;
+    if (!window.confirm(`Turn ${d.name} into a vector SVG with ${priced}?`)) return;
+    setVectoring((v) => ({ ...v, [d.id]: '' }));
+    const fail = (msg: string) => setVectoring((v) => ({ ...v, [d.id]: msg }));
+    try {
+      const r = await api<{ job: { id: string }; credits: number }>('POST', '/api/jobs', {
+        projectId,
+        kind: 'vectorize',
+        assetId: d.id,
+        useOwnKey: own,
+        idempotencyKey: `vector-${d.id}-${crypto.randomUUID().slice(0, 8)}`,
+      });
+      session.setCredits(r.credits);
+      const deadline = Date.now() + 10 * 60_000;
+      while (Date.now() < deadline) {
+        await pause(2500);
+        const { job } = await api<{ job: { status: string; error: string | null; result: { svgUrl: string | null } | null } }>('GET', `/api/jobs/${r.job.id}`);
+        if (job.status === 'complete' && job.result?.svgUrl) {
+          const a = document.createElement('a');
+          a.href = job.result.svgUrl;
+          a.download = d.name.replace(/\.[^.]+$/, '.svg');
+          a.click();
+          setVectoring(({ [d.id]: _, ...rest }) => rest);
+          return;
+        }
+        if (job.status === 'failed' || job.status === 'cancelled') return fail(job.error ?? 'The vector could not be made.');
+      }
+      fail('This is taking longer than expected. Try again shortly.');
+    } catch (err) {
+      fail(err instanceof Error ? err.message : 'Could not start the vector.');
     }
   };
 
@@ -285,9 +326,15 @@ export function Studio() {
                 <img src={`/api/projects/${projectId}/assets/${d.id}`} alt={d.name} loading="lazy" />
                 <div className="row">
                   <a className="btn small" href={`/api/projects/${projectId}/assets/${d.id}`} download={d.name}>Download</a>
+                  {vectorTool && (
+                    <button type="button" className="btn small" disabled={vectoring[d.id] === ''} onClick={() => void vectorize(d)} aria-label={`Download ${d.name} as a vector SVG`}>
+                      {vectoring[d.id] === '' ? 'Vectorising…' : 'Vector SVG'}
+                    </button>
+                  )}
                   <button type="button" className="btn small primary" onClick={() => setAnimateFor(d)}>Animate</button>
                   <button type="button" className="btn small danger" onClick={() => void remove(d)} aria-label={`Delete ${d.name}`}>Delete</button>
                 </div>
+                {vectoring[d.id] && <p className="error small-print" role="alert">{vectoring[d.id]}</p>}
               </li>
             ))}
           </ul>
