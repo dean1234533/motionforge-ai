@@ -1572,15 +1572,19 @@ function ExportView({ scene, assets, projectId, onBack }: { scene: Scene; assets
   );
   const input = useMemo(() => ({ scene, assets }), [scene, assets]);
   const html = useMemo(() => buildStandaloneHtml(input, options), [input, options]);
+  const snippet = useMemo(() => buildSnippet(input, 'motionforge-1', options), [input, options]);
+  const codeField = useRef<HTMLTextAreaElement>(null);
   const kb = Math.round(html.length / 1024);
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(buildSnippet(input, 'motionforge-1', options));
+      await navigator.clipboard.writeText(snippet);
       logExport('snippet');
       setMsg('Embed snippet copied.');
     } catch {
-      setMsg('Your browser blocked copying. Download the HTML file instead.');
+      codeField.current?.focus();
+      codeField.current?.select();
+      setMsg('Copying was blocked. The code is selected below: copy it manually, or download the embed code.');
     }
   };
 
@@ -1607,6 +1611,15 @@ function ExportView({ scene, assets, projectId, onBack }: { scene: Scene; assets
             <p className="muted small-note">Advanced export options (lighter files, commercial licence) are part of the Professional plan.</p>
           )}
 
+          <section className="export-code" aria-labelledby="embed-code-title">
+            <h2 id="embed-code-title">Code to add to your website</h2>
+            <p className="muted">Copy all the code below into your page’s HTML or Custom HTML / Embed block. It includes the animation and its images.</p>
+            <textarea ref={codeField} aria-label="Embed code" readOnly spellCheck={false} value={snippet} />
+            <div className="row wrap">
+              <button type="button" className="btn" onClick={() => { codeField.current?.focus(); codeField.current?.select(); }}>Select code</button>
+              <button type="button" className="btn" onClick={() => { logExport('snippet'); download('motionforge-embed.html', snippet, 'text/html'); }}>Download embed code</button>
+            </div>
+          </section>
           <h2>Install</h2>
           <details open>
             <summary>Any website (HTML)</summary>

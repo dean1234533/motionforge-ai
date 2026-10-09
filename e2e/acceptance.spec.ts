@@ -68,6 +68,9 @@ test('upload -> prompt -> edit path -> export -> exported file works without the
 
   // 7. export
   await page.getByRole('button', { name: 'Export' }).click();
+  await expect(page.getByRole('textbox', { name: 'Embed code' })).toHaveValue(/MotionForge\.mount/);
+  await page.getByRole('button', { name: 'Select code', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Embed code' })).toBeFocused();
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 20_000 }),
     page.getByRole('button', { name: 'Download standalone HTML' }).click(),
