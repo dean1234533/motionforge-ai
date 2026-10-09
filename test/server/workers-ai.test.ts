@@ -90,7 +90,7 @@ describe('Cloudflare AI in the app', () => {
   it('shows the AI as the provider for free mode and for image generation, with no key needed', async () => {
     const app = await setup();
     const { modes, tools } = (await app.call('GET', '/api/modes', undefined, app.u.cookie)).body;
-    expect(modes.find((m: { mode: string }) => m.mode === 'free')).toMatchObject({ provider: 'workers-ai:llama-3.1-8b', available: true, cost: 2 });
+    expect(modes.find((m: { mode: string }) => m.mode === 'free')).toMatchObject({ provider: 'workers-ai:llama-3.1-8b', available: true, cost: 0 });
     expect(tools.find((t: { kind: string }) => t.kind === 'image-gen')).toMatchObject({ available: true, provider: 'workers-ai:flux-1-schnell', platformKey: true, keyProvider: null });
   });
 
@@ -108,9 +108,8 @@ describe('Cloudflare AI in the app', () => {
     expect(created.status).toBe(202);
     await app.settle();
     const job = (await app.call('GET', `/api/jobs/${created.body.job.id}`, undefined, app.u.cookie)).body.job;
-    expect(job).toMatchObject({ status: 'complete', cost: 2 });
+    expect(job).toMatchObject({ status: 'complete', cost: 0 });
     expect(job.result.plan.patch.rotation).toEqual([0, 360]);
-    expect((await app.call('GET', '/api/me', undefined, app.u.cookie)).body.credits).toBe(18);
   });
 
   it('still completes the job (with the rules planner) when the AI is down', async () => {
@@ -128,7 +127,7 @@ describe('Cloudflare AI in the app', () => {
     expect(created.status).toBe(202);
     await app.settle();
     const job = (await app.call('GET', `/api/jobs/${created.body.job.id}`, undefined, app.u.cookie)).body.job;
-    expect(job).toMatchObject({ kind: 'image-gen', status: 'complete', cost: 4 });
+    expect(job).toMatchObject({ kind: 'image-gen', status: 'complete', cost: 0 });
     const flux = app.ai.calls.find((c) => c.model.includes('flux'))!;
     expect(flux.model).toBe('@cf/black-forest-labs/flux-1-schnell');
     expect(flux.input.steps).toBe(4);
@@ -136,7 +135,6 @@ describe('Cloudflare AI in the app', () => {
     const asset = await app.call('GET', `/api/projects/${app.pid}/assets/${job.result.assetId}`, undefined, app.u.cookie);
     expect(asset.headers.get('content-type')).toBe('image/jpeg');
     expect(Array.from(asset.bytes)).toEqual(Array.from(JPEG));
-    expect((await app.call('GET', '/api/me', undefined, app.u.cookie)).body.credits).toBe(16);
   });
 
   it('fails image generation cleanly, refundable, without leaking internals', async () => {
@@ -147,7 +145,7 @@ describe('Cloudflare AI in the app', () => {
     expect(job.status).toBe('failed');
     expect(job.error).toContain('could not create that image');
     expect(JSON.stringify(job)).not.toContain('gpu 7');
-    expect((await app.call('POST', `/api/jobs/${id}/cancel`, {}, app.u.cookie)).body.credits).toBe(20);
+    expect((await app.call('POST', `/api/jobs/${id}/cancel`, {}, app.u.cookie)).status).toBe(200);
   });
 
   it('does not accept "use my own key" for the built-in AI', async () => {

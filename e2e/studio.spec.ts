@@ -69,7 +69,6 @@ test('designs a logo, then opens it in the editor already animated', async ({ pa
   await page.getByText('See or edit the full design prompt').click();
   await expect(page.getByLabel('Design prompt')).toHaveValue(/"Aqua Vibe" is spelled exactly/);
 
-  page.once('dialog', (d) => void d.accept());
   await page.getByRole('button', { name: 'Create 2 designs' }).click();
   await expect(page.locator('.brand-gallery li')).toHaveCount(2, { timeout: 15_000 });
   expect(seen.jobs).toHaveLength(2);
@@ -96,7 +95,6 @@ test('switches to flyer fields and a portrait canvas', async ({ page }) => {
   await page.getByLabel('Headline', { exact: true }).fill('Milestone Birthday');
   await page.getByLabel(/Details to print/).fill('Sat 14 June, 8pm');
   await page.getByLabel('How many variations').selectOption('1');
-  page.once('dialog', (d) => void d.accept());
   await page.getByRole('button', { name: 'Create design' }).click();
   await expect(page.locator('.brand-gallery li')).toHaveCount(1, { timeout: 15_000 });
   expect(seen.jobs[0]).toMatchObject({ aspect: 'portrait', transparent: false });
@@ -108,7 +106,6 @@ test('downloads a design as a vector SVG', async ({ page }) => {
   await page.goto('/#/studio');
   await page.getByLabel('Brand name').fill('Aqua Vibe');
   await page.getByLabel('How many variations').selectOption('1');
-  page.once('dialog', (d) => void d.accept());
   await page.getByRole('button', { name: 'Create design' }).click();
   await expect(page.locator('.brand-gallery li')).toHaveCount(1, { timeout: 15_000 });
 
@@ -125,7 +122,6 @@ test('builds a brand kit ZIP with the SVG, colours and guide', async ({ page }) 
   await page.goto('/#/studio');
   await page.getByLabel('Brand name').fill('Aqua Vibe');
   await page.getByLabel('How many variations').selectOption('1');
-  page.once('dialog', (d) => void d.accept());
   await page.getByRole('button', { name: 'Create design' }).click();
   await expect(page.locator('.brand-gallery li')).toHaveCount(1, { timeout: 15_000 });
 

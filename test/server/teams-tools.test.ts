@@ -26,10 +26,8 @@ async function join(app: App, owner: { cookie: string }, teamId: string, role: '
 }
 
 describe('teams', () => {
-  it('only the Professional plan can create teams', async () => {
+  it('creates teams', async () => {
     const app = makeApp();
-    const free = await app.user();
-    expect((await app.call('POST', '/api/teams', { name: 'Nope' }, free.cookie)).status).toBe(402);
     const owner = await pro(app);
     const r = await app.call('POST', '/api/teams', { name: '  Studio <b>  ' }, owner.cookie);
     expect(r.status).toBe(201);
@@ -228,10 +226,10 @@ describe('image generation and upscaling (mocked HTTP; not verified against the 
     const full = await setup({ OPENAI_IMAGE_MODEL: 'img-model', OPENAI_API_KEY: 'sk-platform', REPLICATE_UPSCALE_VERSION: 'upver1234567', REPLICATE_API_TOKEN: 'r8_platform' });
     const t = (await full.call('GET', '/api/modes', undefined, full.u.cookie)).body.tools;
     expect(t).toEqual([
-      expect.objectContaining({ kind: 'image-gen', available: true, cost: 4, ownKeyCost: 0, platformKey: true, provider: 'openai:img-model' }),
-      expect.objectContaining({ kind: 'upscale', available: true, cost: 6, platformKey: true }),
-      expect.objectContaining({ kind: 'design', available: true, cost: 6, platformKey: true, provider: 'openai:img-model' }),
-      expect.objectContaining({ kind: 'vectorize', available: true, cost: 4, platformKey: true, provider: 'replicate:recraft-ai/recraft-vectorize' }),
+      expect.objectContaining({ kind: 'image-gen', available: true, cost: 0, ownKeyCost: 0, platformKey: true, provider: 'openai:img-model' }),
+      expect.objectContaining({ kind: 'upscale', available: true, cost: 0, platformKey: true }),
+      expect.objectContaining({ kind: 'design', available: true, cost: 0, platformKey: true, provider: 'openai:img-model' }),
+      expect.objectContaining({ kind: 'vectorize', available: true, cost: 0, platformKey: true, provider: 'replicate:recraft-ai/recraft-vectorize' }),
     ]);
   });
 
@@ -241,7 +239,7 @@ describe('image generation and upscaling (mocked HTTP; not verified against the 
     expect(created.status).toBe(202);
     await app.settle();
     const job = (await app.call('GET', `/api/jobs/${created.body.job.id}`, undefined, app.u.cookie)).body.job;
-    expect(job).toMatchObject({ kind: 'image-gen', status: 'complete', cost: 4 });
+    expect(job).toMatchObject({ kind: 'image-gen', status: 'complete', cost: 0 });
     expect(job.result.assetId).toMatch(/^gen-/);
 
     const call = app.calls[0];
@@ -251,7 +249,6 @@ describe('image generation and upscaling (mocked HTTP; not verified against the 
 
     const asset = await app.call('GET', `/api/projects/${app.pid}/assets/${job.result.assetId}`, undefined, app.u.cookie);
     expect(Array.from(asset.bytes)).toEqual(Array.from(PNG));
-    expect((await app.call('GET', '/api/me', undefined, app.u.cookie)).body.credits).toBe(16);
   });
 
   it('asks for a transparent background when the model supports it', async () => {
@@ -272,7 +269,6 @@ describe('image generation and upscaling (mocked HTTP; not verified against the 
     await app.settle();
     expect(app.calls[0].auth).toBe('Bearer sk-user-own-key-9999');
     expect((await app.call('GET', `/api/jobs/${created.body.job.id}`, undefined, app.u.cookie)).body.job).toMatchObject({ status: 'complete', cost: 0 });
-    expect((await app.call('GET', '/api/me', undefined, app.u.cookie)).body.credits).toBe(20);
   });
 
   it('surfaces provider errors without leaking the key', async () => {
@@ -284,7 +280,7 @@ describe('image generation and upscaling (mocked HTTP; not verified against the 
     await app.settle();
     const job = (await app.call('GET', `/api/jobs/${id}`, undefined, u.cookie)).body.job;
     expect(job).toMatchObject({ status: 'failed', error: 'The provider rejected the API key.' });
-    expect((await app.call('POST', `/api/jobs/${id}/cancel`, {}, u.cookie)).body.credits).toBe(20);
+    expect((await app.call('POST', `/api/jobs/${id}/cancel`, {}, u.cookie)).status).toBe(200);
   });
 
   it('upscales an existing image into a new high-resolution image', async () => {
@@ -299,11 +295,10 @@ describe('image generation and upscaling (mocked HTTP; not verified against the 
     await app.resume();
     await app.resume();
     const job = (await app.call('GET', `/api/jobs/${created.body.job.id}`, undefined, app.u.cookie)).body.job;
-    expect(job).toMatchObject({ kind: 'upscale', status: 'complete', cost: 6 });
+    expect(job).toMatchObject({ kind: 'upscale', status: 'complete', cost: 0 });
     const assets = (await app.call('GET', `/api/projects/${app.pid}/assets`, undefined, app.u.cookie)).body.assets;
     expect(assets.find((a: { id: string }) => a.id === job.result.assetId)).toMatchObject({ name: 'bird-hd.png', hd: true });
     expect(assets.find((a: { id: string }) => a.id === 'bird-1')).toMatchObject({ hd: false });
-    expect((await app.call('GET', '/api/me', undefined, app.u.cookie)).body.credits).toBe(14);
   });
 
   it('tool jobs on a team project are open to editors only', async () => {

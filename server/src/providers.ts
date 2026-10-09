@@ -28,19 +28,20 @@ export const stagesFor = (kind: JobKind): readonly string[] => (kind === 'motion
 
 export type Mode = 'free' | 'fast' | 'professional' | 'byok';
 
+/** There are no credits: every mode and tool is unlimited. `cost` stays in the API as 0. */
 export const MODES: Record<Mode, { label: string; cost: number }> = {
-  free: { label: 'Free', cost: 2 },
-  fast: { label: 'Fast', cost: 10 },
-  professional: { label: 'Professional', cost: 40 },
+  free: { label: 'Free', cost: 0 },
+  fast: { label: 'Fast', cost: 0 },
+  professional: { label: 'Professional', cost: 0 },
   byok: { label: 'Bring your own key', cost: 0 },
 };
 
-/** One-off tools. With your own key the platform charges no credits. */
+/** One-off tools. */
 export const TOOLS: Record<Exclude<JobKind, 'motion'>, { label: string; cost: number }> = {
-  'image-gen': { label: 'Image generation', cost: 4 },
-  upscale: { label: 'Upscale', cost: 6 },
-  design: { label: 'Brand design', cost: 6 },
-  vectorize: { label: 'Vector logo (SVG)', cost: 4 },
+  'image-gen': { label: 'Image generation', cost: 0 },
+  upscale: { label: 'Upscale', cost: 0 },
+  design: { label: 'Brand design', cost: 0 },
+  vectorize: { label: 'Vector logo (SVG)', cost: 0 },
 };
 
 export interface StepContext {

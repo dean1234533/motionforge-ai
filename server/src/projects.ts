@@ -3,7 +3,6 @@ import { emptyScene } from '../../src/scene/defaults';
 import { sanitizeText } from '../../src/lib/sanitize';
 import { projectAccess } from './access';
 import { HttpError } from './http';
-import { projectLimit } from './plans';
 import { requireTeamEditor } from './teams';
 import { assetKey, framesKey } from './assets';
 import type { D1Database, Env } from './types';
@@ -73,11 +72,6 @@ export async function getProject(db: D1Database, actorId: string, id: string) {
 
 export async function createProject(db: D1Database, user: { id: string; plan: string }, name: unknown, scene: unknown, teamId?: unknown) {
   const userId = user.id;
-  const owned = await db.prepare('SELECT COUNT(*) AS n FROM projects WHERE user_id = ?').bind(userId).first<{ n: number }>();
-  const limit = projectLimit(user.plan);
-  if ((owned?.n ?? 0) >= limit) {
-    throw new HttpError(402, `Your ${user.plan === 'free' ? 'Free' : user.plan} plan includes up to ${limit} projects. Delete one or upgrade to add more.`);
-  }
   let team: string | null = null;
   if (teamId !== undefined && teamId !== null) {
     if (typeof teamId !== 'string') throw new HttpError(400, 'Invalid team.');

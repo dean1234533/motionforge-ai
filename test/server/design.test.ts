@@ -67,14 +67,13 @@ describe('Brand Studio designs (mocked HTTP; not verified against the live servi
     expect(created.status).toBe(202);
     await app.settle();
     const job = (await app.call('GET', `/api/jobs/${created.body.job.id}`, undefined, app.u.cookie)).body.job;
-    expect(job).toMatchObject({ kind: 'design', status: 'complete', cost: 6 });
+    expect(job).toMatchObject({ kind: 'design', status: 'complete', cost: 0 });
     expect(job.result.assetId).toMatch(/^design-[0-9a-f]{8}$/);
 
     expect(app.calls[0].body).toMatchObject({ model: 'img-model', size: '1024x1536', background: 'transparent', output_format: 'png' });
     expect(app.calls[0].body.prompt).toBe('Professional logo design for the brand "Aqua Vibe".');
     const assets = (await app.call('GET', `/api/projects/${app.pid}/assets`, undefined, app.u.cookie)).body.assets;
     expect(assets[0].name).toMatch(/^aqua-vibe-[0-9a-f]{8}\.png$/);
-    expect((await app.call('GET', '/api/me', undefined, app.u.cookie)).body.credits).toBe(14);
   });
 
   it('accepts longer briefs than other jobs, and falls back to a square canvas', async () => {
@@ -175,7 +174,7 @@ describe('vector SVG logos (mocked HTTP; not verified against the live services)
     await app.settle();
     for (let i = 0; i < 3; i++) await app.resume();
     const job = (await app.call('GET', `/api/jobs/${created.body.job.id}`, undefined, app.u.cookie)).body.job;
-    expect(job).toMatchObject({ kind: 'vectorize', status: 'complete', cost: 4 });
+    expect(job).toMatchObject({ kind: 'vectorize', status: 'complete', cost: 0 });
     expect(job.result.svgUrl).toBe(`/api/jobs/${job.id}/svg`);
 
     const start = app.calls.find((c) => c.url.endsWith('/predictions'))!;

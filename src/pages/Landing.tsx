@@ -96,7 +96,7 @@ export function Landing() {
       <header className="landing-nav">
         <a className="brand brand-new" href="#/" aria-label="MotionForge AI home"><Mark /><span>MotionForge</span><em>AI</em></a>
         <nav aria-label="Main navigation"><a href="#showcase" onClick={(event) => scrollToSection(event, 'showcase')}>Showcase</a><a href="#features" onClick={(event) => scrollToSection(event, 'features')}>Features</a><a href="#/docs">Docs</a></nav>
-        <div className="nav-actions"><a className="nav-login" href={user ? '#/dashboard' : '#/login'}>{user ? 'Projects' : 'Log in'}</a><a className="btn primary nav-cta" href={user ? '#/new' : '#/signup'}>{user ? 'New project' : 'Start creating'} <Arrow /></a></div>
+        <div className="nav-actions"><a className="nav-login" href={user ? '#/dashboard' : '#/login'}>{user ? 'Projects' : 'Log in'}</a><a className="btn primary nav-cta" href={user ? '#/new' : '#/login'}>{user ? 'New project' : 'Start creating'} <Arrow /></a></div>
       </header>
 
       <main>

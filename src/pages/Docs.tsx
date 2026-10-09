@@ -45,7 +45,7 @@ export function Docs() {
         <p>A layer can <b>follow another layer</b> (put fire behind a rocket, or trace a bird's flight path with a line) and can have <b>parallax</b>, drifting against the scroll to create depth. Try “add smoke behind it”, “add rain”, “add a line showing its path” or “give it more depth”.</p>
 
         <h2>Generating video and images</h2>
-        <p>With an account, the Fast and Professional modes turn a still into video. The subject is filmed on a flat green or blue screen, and that colour is keyed out of every frame so you get transparent frames. “Create with AI” makes new images from a description, and “Upscale” enlarges an image so frames are sharper. Each shows its cost and asks before it spends credits; with your own provider key they cost no credits.</p>
+        <p>With an account, the Fast and Professional modes turn a still into video. The subject is filmed on a flat green or blue screen, and that colour is keyed out of every frame so you get transparent frames. “Create with AI” makes new images from a description, and “Upscale” enlarges an image so frames are sharper. There are no credits or limits: generate as much as you like, with the server's keys or your own.</p>
 
         <h2>Teams and plans</h2>
         <p>The Professional plan can create teams. Invite people by email: owners choose editor or viewer, and the invitation link works only for that address. Everyone on a team can open its projects; viewers can look and export, editors can change them. Free exports carry a small “Made with MotionForge” badge, Creator and Professional exports do not and use sharper frames, and Professional adds lighter-file options, a commercial licence and priority processing.</p>

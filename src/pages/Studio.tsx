@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { AppNav } from '../components/AppNav';
 import { api, uploadBinary } from '../lib/api';
-import { useSession } from '../lib/session';
 import { emptyScene, newObject } from '../scene/defaults';
 import { kitSlug, makeBrandKit } from '../studio/brandKit';
 import { DESIGN_TYPES, LOGO_ANIMATIONS, buildDesignPrompt, logoAnimationPlan, typeInfo } from '../studio/briefs';
@@ -42,7 +41,6 @@ const KEY_NAMES: Record<string, string> = { replicate: 'Replicate', openai: 'Ope
 const keyName = (k: string | null) => (k ? KEY_NAMES[k] ?? k : 'API');
 
 export function Studio() {
-  const session = useSession();
   const [tool, setTool] = useState<DesignTool | null>(null);
   const [vectorTool, setVectorTool] = useState<DesignTool | null>(null);
   /** Designs being turned into SVG, and any error for each. */
@@ -61,7 +59,7 @@ export function Studio() {
   const [animateFor, setAnimateFor] = useState<Design | null>(null);
   const [animation, setAnimation] = useState(LOGO_ANIMATIONS[0].id);
   const [animating, setAnimating] = useState(false);
-  /** Finished SVGs this session, so a logo is never vectorised (and charged) twice. */
+  /** Finished SVGs this session, so a logo is never vectorised twice. */
   const [svgUrls, setSvgUrls] = useState<Record<string, string>>({});
   const [kitFor, setKitFor] = useState<Design | null>(null);
   const [kitBrand, setKitBrand] = useState('');
@@ -75,7 +73,6 @@ export function Studio() {
   const prompt = customPrompt ?? built.prompt;
   const ownKeyOnly = Boolean(tool && !tool.platformKey);
   const payWithKey = ownKeyOnly || useOwnKey;
-  const total = payWithKey ? 0 : (tool?.cost ?? 0) * count;
 
   const loadDesigns = async (pid: string) => {
     const { assets } = await api<{ assets: Design[] }>('GET', `/api/projects/${pid}/assets`);
@@ -86,12 +83,11 @@ export function Studio() {
     (async () => {
       try {
         const [modes, list] = await Promise.all([
-          api<{ tools: (DesignTool | { kind: string })[]; balance: number }>('GET', '/api/modes'),
+          api<{ tools: (DesignTool | { kind: string })[] }>('GET', '/api/modes'),
           api<{ projects: { id: string; name: string; teamId: string | null }[] }>('GET', '/api/projects'),
         ]);
         setTool((modes.tools.find((t) => t.kind === 'design') as DesignTool | undefined) ?? null);
         setVectorTool((modes.tools.find((t) => t.kind === 'vectorize' && 'available' in t && t.available) as DesignTool | undefined) ?? null);
-        session.setCredits(modes.balance);
         const studio = list.projects.find((p) => p.name === STUDIO_PROJECT && !p.teamId);
         if (studio) {
           setProjectId(studio.id);
@@ -140,14 +136,13 @@ export function Studio() {
     e.preventDefault();
     if (!tool || busy) return;
     setError('');
-    const priced = total ? `${total} credits` : 'your own API key (no credits)';
-    if (!window.confirm(`Create ${count} ${info.label.toLowerCase()} design${count === 1 ? '' : 's'} with ${priced}?`)) return;
+    if (payWithKey && !window.confirm(`Create ${count} ${info.label.toLowerCase()} design${count === 1 ? '' : 's'} with your own API key?`)) return;
     setBusy(true);
     try {
       const pid = await ensureProject();
       const batch = crypto.randomUUID().slice(0, 12);
       for (let i = 0; i < count; i++) {
-        const r = await api<{ job: { id: string }; credits: number }>('POST', '/api/jobs', {
+        const r = await api<{ job: { id: string } }>('POST', '/api/jobs', {
           projectId: pid,
           kind: 'design',
           prompt,
@@ -157,7 +152,6 @@ export function Studio() {
           useOwnKey: payWithKey,
           idempotencyKey: `design-${batch}-${i}`,
         });
-        session.setCredits(r.credits);
         setPending((p) => [...p, { jobId: r.job.id, label: `${brief.name || info.label} #${i + 1}` }]);
         void waitFor(pid, r.job.id);
       }
@@ -170,21 +164,20 @@ export function Studio() {
 
   const vectorPrice = () => {
     const own = !vectorTool?.platformKey || useOwnKey;
-    return { own, label: own ? `your own ${keyName(vectorTool?.keyProvider ?? null)} key (no credits)` : `${vectorTool?.cost ?? 0} credits` };
+    return { own, label: own ? `your own ${keyName(vectorTool?.keyProvider ?? null)} key` : 'the server key' };
   };
 
   /** Runs the vectorise job once per design and session; later calls reuse the finished SVG. */
   const makeVector = async (d: Design): Promise<string> => {
     if (svgUrls[d.id]) return svgUrls[d.id];
     if (!projectId || !vectorTool) throw new Error('Vector logos are not set up on this server.');
-    const r = await api<{ job: { id: string }; credits: number }>('POST', '/api/jobs', {
+    const r = await api<{ job: { id: string } }>('POST', '/api/jobs', {
       projectId,
       kind: 'vectorize',
       assetId: d.id,
       useOwnKey: vectorPrice().own,
       idempotencyKey: `vector-${d.id}-${crypto.randomUUID().slice(0, 8)}`,
     });
-    session.setCredits(r.credits);
     const deadline = Date.now() + 10 * 60_000;
     while (Date.now() < deadline) {
       await pause(2500);
@@ -355,7 +348,7 @@ export function Studio() {
 
           <div className="row between">
             <span className="muted">
-              {payWithKey ? `Uses your own ${keyName(tool.keyProvider)} key${ownKeyOnly ? ' (connect it in Settings)' : ''}.` : `${total} credits · ${session.credits} available`}
+              {payWithKey ? `Uses your own ${keyName(tool.keyProvider)} key${ownKeyOnly ? ' (connect it in Settings)' : ''}.` : 'Unlimited.'}
               {tool.provider?.startsWith('workers-ai') ? ' · Square only; keep names short for clean lettering.' : ''}
             </span>
             <button type="submit" className="btn primary big" disabled={busy || !brief.name.trim()}>{busy ? 'Starting…' : `Create ${count === 1 ? 'design' : `${count} designs`}`}</button>

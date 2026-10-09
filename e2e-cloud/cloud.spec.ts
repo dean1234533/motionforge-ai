@@ -25,7 +25,7 @@ async function visiblePixels(page: Page) {
   });
 }
 
-test('account -> project -> upload -> autosave -> reload -> share -> settings -> billing', async ({ page, browser }) => {
+test('account -> project -> upload -> autosave -> reload -> share -> settings', async ({ page, browser }) => {
   page.on('pageerror', (e) => console.log('[page error]', e.message, e.stack));
   // The server has Cloudflare AI bound, so describing a movement is a (confirmed) paid job. When the AI cannot be
   // reached, as it cannot from a test machine, the server falls back to the rule-based planner.
@@ -39,7 +39,6 @@ test('account -> project -> upload -> autosave -> reload -> share -> settings ->
   await page.getByRole('button', { name: 'Sign up' }).click();
   await expect(page.getByRole('heading', { name: 'Your projects' })).toBeVisible();
   await expect(page.getByText('No projects yet')).toBeVisible();
-  await expect(page.getByText('20 credits')).toBeVisible();
 
   // new project
   await page.getByRole('link', { name: 'Create your first animation' }).click();
@@ -107,11 +106,6 @@ test('account -> project -> upload -> autosave -> reload -> share -> settings ->
   expect(await page.content()).not.toContain('r8_fake_key_for_testing');
   await page.getByRole('button', { name: 'Remove' }).first().click().catch(() => undefined);
   page.once('dialog', (d) => void d.accept());
-
-  // billing is honest when Stripe is not configured
-  await page.goto('/#/billing');
-  await expect(page.getByText('Paid plans are not enabled on this server yet')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Choose Creator' })).toBeDisabled();
 
   // dashboard lists the project; log out blocks access
   await page.goto('/#/dashboard');

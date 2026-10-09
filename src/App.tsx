@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSession } from './lib/session';
 import { Auth } from './pages/Auth';
-import { Billing } from './pages/Billing';
 import { Dashboard } from './pages/Dashboard';
 import { Docs } from './pages/Docs';
 import { Invite } from './pages/Invite';
@@ -70,8 +69,6 @@ export function App() {
       return <RequireAuth><Teams /></RequireAuth>;
     case '/settings':
       return <RequireAuth><Settings /></RequireAuth>;
-    case '/billing':
-      return <RequireAuth><Billing status={params.get('status')} /></RequireAuth>;
     case '/docs':
       return <Docs />;
     default:

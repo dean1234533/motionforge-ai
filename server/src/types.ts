@@ -32,6 +32,8 @@ export interface Env {
   /** base64 of 32 random bytes; set with `wrangler secret put`. */
   KEY_ENCRYPTION_SECRET: string;
   ALLOWED_ORIGIN?: string;
+  /** Who may sign up and log in (comma-separated). Unset: only the built-in owner account. */
+  OWNER_EMAIL?: string;
   /** Public base URL of the app, used for Stripe return links. */
   APP_URL?: string;
   STRIPE_SECRET_KEY?: string;

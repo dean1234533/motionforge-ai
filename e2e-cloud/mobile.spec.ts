@@ -37,7 +37,6 @@ test('account pages and the cloud editor fit and work on a phone', async ({ page
 
   for (const [path, heading] of [
     ['/#/settings', 'AI providers'],
-    ['/#/billing', 'Billing and credits'],
     ['/#/teams', 'Teams'],
     ['/#/new', 'New project'],
   ] as const) {
