@@ -1,11 +1,12 @@
 name: Deploy
-# Deploys the Worker to Cloudflare from GitHub. It only runs when you start it by hand (Actions tab > Deploy > Run workflow),
-# so nothing changes on your live site unless you ask.
+# Deploys the Worker to Cloudflare whenever main is updated. Manual deployments remain available.
 #   ref     = which commit's website to build (empty = newest on main)
 #   overlay = paths copied from the newest main on top of that commit (for example "server wrangler.jsonc"),
 #             so you can keep an older front end and still get newer back-end fixes.
 # Needs the repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       ref:
@@ -16,6 +17,9 @@ on:
         description: Paths to copy from the newest main on top of that commit (empty = none)
         required: false
         default: ''
+concurrency:
+  group: cloudflare-production
+  cancel-in-progress: false
 jobs:
   deploy:
     runs-on: ubuntu-latest
