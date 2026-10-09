@@ -57,13 +57,9 @@ test('account -> project -> upload -> autosave -> reload -> share -> settings ->
   // wait for the server to confirm the save of the planned path (not just for the "Saved" label)
   await page.waitForResponse((r) => r.request().method() === 'PUT' && /\/api\/projects\/[0-9a-f-]{36}$/.test(r.url()) && r.request().postData()?.includes('"progress":0.25') === true, { timeout: 15_000 });
 
-  // every mode can be chosen; ones this server has not set up explain why instead of being greyed out
+  // Fast and Professional are hidden until the server has its own Replicate token
   const mode = page.locator('select[aria-label="Generation mode"]');
-  await mode.selectOption('fast');
-  await expect(page.getByText('the server cannot see REPLICATE_API_TOKEN')).toBeVisible();
-  await page.locator('#prompt').fill('make it fly');
-  await page.getByRole('button', { name: 'Send' }).click();
-  await expect(page.getByText('the server cannot see REPLICATE_API_TOKEN').first()).toBeVisible();
+  await expect(mode.locator('option')).toHaveText(['Free', 'Bring your own key']);
   await mode.selectOption('byok'); // bring-your-own-key needs no server setup
   await expect(page.getByText('not available on this server')).toHaveCount(0);
   await mode.selectOption('free');
@@ -104,7 +100,7 @@ test('account -> project -> upload -> autosave -> reload -> share -> settings ->
   // the setup checklist names what this server is missing (yes/no only)
   await expect(page.getByRole('heading', { name: 'Server setup' })).toBeVisible();
   await expect(page.getByRole('row', { name: /REPLICATE_API_TOKEN\s+No/ })).toBeVisible();
-  await expect(page.getByRole('row', { name: /KEY_ENCRYPTION_SECRET\s+Yes/ })).toBeVisible();
+  await expect(page.getByRole('row', { name: /KEY_ENCRYPTION_SECRET \(optional\)\s+Yes/ })).toBeVisible();
   await page.getByLabel('API key').first().fill('r8_fake_key_for_testing_5678');
   await page.getByRole('button', { name: 'Save' }).first().click();
   await expect(page.getByText('Saved key ending in 5678')).toBeVisible();
